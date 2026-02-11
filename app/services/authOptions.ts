@@ -6,8 +6,13 @@ import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import prisma from '../../lib/prisma'
 import bcrypt from 'bcryptjs'
 
+const isGoogleEnabled =
+  process.env.NODE_ENV !== 'production' &&
+  !!process.env.GOOGLE_CLIENT_ID &&
+  !!process.env.GOOGLE_CLIENT_SECRET
+
 // Build providers array based on available configuration
-const providers = [
+const providers: NextAuthOptions['providers'] = [
   // Credentials provider for email + password
   CredentialsProvider({
     name: 'Credentials',
@@ -49,21 +54,24 @@ const providers = [
       }
     },
   }),
-
-  // Google OAuth
-  GoogleProvider({
-    clientId: process.env.GOOGLE_CLIENT_ID || '',
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    allowDangerousEmailAccountLinking: true,
-  }),
 ]
+
+if (isGoogleEnabled) {
+  // Google OAuth (disabled in production until verified)
+  providers.push(
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID || '',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      allowDangerousEmailAccountLinking: true,
+    })
+  )
+}
 
 const adapter = PrismaAdapter(prisma) as Adapter
 
 export const authOptions: NextAuthOptions = {
   adapter,
   providers,
-  trustHost: true,
   useSecureCookies: process.env.NODE_ENV === 'production',
   session: {
     strategy: 'jwt',

@@ -160,8 +160,8 @@ export async function generateSpeechWithElevenLabs(
 ): Promise<string> {
   try {
     const voiceSettings = NARRATION_SETTINGS[narrationType] || NARRATION_SETTINGS.Realistic;
-    const preferredVoices = getVoicesForLanguage(language, voiceGender);
-    const languageVoices = getVoicesForLanguage(language, VoiceGender.AUTO);
+    const preferredVoices = getVoicesForLanguageAndGender(language, voiceGender);
+    const languageVoices = getVoicesForLanguage(language);
     const resolvedVoiceType = preferredVoices.includes(voiceType)
       ? voiceType
       : preferredVoices[0] || languageVoices[0] || VoiceName.FENRIR;

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, VoiceGender } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, VoiceGender, TextToSpeechProvider } from './types';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, GlobeIcon } from '../components/Icons';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
 
@@ -19,7 +19,7 @@ export default function Home() {
     voiceType: VoiceName.ZEPHYR,
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
-    ttsProvider: 'elevenlabs' as any,
+    ttsProvider: TextToSpeechProvider.ELEVENLABS,
     enableBackgroundMusic: true,
     backgroundMusicVolume: 0.15,
   });

@@ -1,5 +1,5 @@
 import prisma from '../../lib/prisma'
-import { Settings, SearchMode, VoiceName, Language, VoiceGender } from '../types'
+import { Settings, SearchMode, VoiceName, Language, VoiceGender, TextToSpeechProvider } from '../types'
 
 /**
  * UserService: Manages user profiles, settings, and chat history.
@@ -20,7 +20,7 @@ export async function getUserSettings(userId: number): Promise<Settings | null> 
       voiceType: settings.voiceType as VoiceName,
       voiceGender: (settings.voiceGender as VoiceGender) || VoiceGender.AUTO,
       language: settings.language as Language,
-      ttsProvider: (settings.ttsProvider as any) || 'elevenlabs',
+      ttsProvider: (settings.ttsProvider as TextToSpeechProvider) || TextToSpeechProvider.ELEVENLABS,
       enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
       backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
     }

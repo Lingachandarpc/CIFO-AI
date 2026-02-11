@@ -1,29 +1,27 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function VerifyEmail() {
+export const dynamic = "force-dynamic";
+
+function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const email = searchParams.get("email") || "";
   const [resendCount, setResendCount] = useState(0);
-  const [canResend, setCanResend] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  const canResend = cooldown === 0;
 
   useEffect(() => {
     if (cooldown > 0) {
       const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
       return () => clearTimeout(timer);
     }
-    if (cooldown === 0 && resendCount > 0) {
-      setCanResend(true);
-    }
-  }, [cooldown, resendCount]);
+  }, [cooldown]);
 
   const handleResend = async () => {
-    setCanResend(false);
-    setResendCount(resendCount + 1);
+    setResendCount((prev) => prev + 1);
     setCooldown(60); // 60 second cooldown
 
     // In a real app, you'd call an API to resend the email
@@ -36,12 +34,12 @@ export default function VerifyEmail() {
 
       if (!response.ok) {
         alert("Failed to resend email. Please try again.");
-        setCanResend(true);
+        setCooldown(0);
       }
     } catch (error) {
       console.error("Error resending email:", error);
       alert("An error occurred. Please try again.");
-      setCanResend(true);
+      setCooldown(0);
     }
   };
 
@@ -67,7 +65,7 @@ export default function VerifyEmail() {
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">Verify your email</h1>
           <p className="text-neutral-400">
-            We've sent a magic link to <strong className="text-white">{email}</strong>
+            We&apos;ve sent a magic link to <strong className="text-white">{email}</strong>
           </p>
         </div>
 
@@ -118,7 +116,7 @@ export default function VerifyEmail() {
 
         {/* Resend */}
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 mb-6">
-          <p className="text-neutral-400 text-sm mb-4">Didn't receive the email?</p>
+          <p className="text-neutral-400 text-sm mb-4">Didn&apos;t receive the email?</p>
           <button
             onClick={handleResend}
             disabled={!canResend}
@@ -138,7 +136,7 @@ export default function VerifyEmail() {
           </button>
           {resendCount > 0 && (
             <p className="text-xs text-neutral-500 mt-3">
-              You've requested {resendCount} resend{resendCount > 1 ? "s" : ""}
+              You&apos;ve requested {resendCount} resend{resendCount > 1 ? "s" : ""}
             </p>
           )}
         </div>
@@ -170,5 +168,19 @@ export default function VerifyEmail() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function VerifyEmail() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4">
+          <div className="text-neutral-500 text-sm uppercase tracking-widest">Loading</div>
+        </div>
+      }
+    >
+      <VerifyEmailContent />
+    </Suspense>
   );
 }
