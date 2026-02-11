@@ -32,6 +32,7 @@ export async function GET() {
           narrationTime: 5,
           narrationType: 'Realistic',
           voiceType: 'zephyr',
+          voiceGender: 'auto',
           language: 'English',
           ttsProvider: 'elevenlabs',
           enableBackgroundMusic: true,

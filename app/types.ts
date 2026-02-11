@@ -31,6 +31,12 @@ export enum VoiceName {
   FENRIR = "fenrir",
 }
 
+export enum VoiceGender {
+  AUTO = "auto",
+  MALE = "male",
+  FEMALE = "female",
+}
+
 export enum TextToSpeechProvider {
   OPENAI = "openai",
   ELEVENLABS = "elevenlabs",
@@ -54,6 +60,7 @@ export interface Settings {
   narrationTime: number;
   narrationType: "Realistic" | "Dramatic" | "Educational";
   voiceType: VoiceName;
+  voiceGender: VoiceGender;
   language: Language;
   ttsProvider: TextToSpeechProvider;
   enableBackgroundMusic: boolean;

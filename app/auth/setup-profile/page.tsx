@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Language, VoiceName } from "../../types";
+import { Language, VoiceName, VoiceGender } from "../../types";
 
 export default function SetupProfile() {
   const router = useRouter();
@@ -23,6 +23,7 @@ export default function SetupProfile() {
   const [settings, setSettings] = useState({
     language: Language.ENGLISH,
     voiceType: VoiceName.ZEPHYR,
+    voiceGender: VoiceGender.AUTO,
     narrationType: "Realistic",
     narrationTime: 5,
   });

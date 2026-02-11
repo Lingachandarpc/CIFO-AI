@@ -1,4 +1,4 @@
-import { Language, VoiceName } from '../types';
+import { Language, VoiceName, VoiceGender } from '../types';
 
 // ElevenLabs voice IDs with language and persona support
 export const ELEVENLABS_VOICES: Record<
@@ -8,6 +8,7 @@ export const ELEVENLABS_VOICES: Record<
     id: string;
     languages: Language[];
     description: string;
+    gender: VoiceGender;
   }
 > = {
   [VoiceName.ZEPHYR]: {
@@ -21,6 +22,7 @@ export const ELEVENLABS_VOICES: Record<
       Language.PORTUGUESE,
     ],
     description: 'Clear, calm, professional tone - ideal for educational content',
+    gender: VoiceGender.FEMALE,
   },
   [VoiceName.KORE]: {
     name: 'Kore',
@@ -34,6 +36,7 @@ export const ELEVENLABS_VOICES: Record<
       Language.HINDI,
     ],
     description: 'Warm, engaging tone - perfect for storytelling and narratives',
+    gender: VoiceGender.FEMALE,
   },
   [VoiceName.PUCK]: {
     name: 'Puck',
@@ -46,6 +49,7 @@ export const ELEVENLABS_VOICES: Record<
       Language.PORTUGUESE,
     ],
     description: 'Energetic, dynamic tone - great for case studies and business content',
+    gender: VoiceGender.MALE,
   },
   [VoiceName.CHARON]: {
     name: 'Charon',
@@ -57,6 +61,7 @@ export const ELEVENLABS_VOICES: Record<
       Language.HINDI,
     ],
     description: 'Deep, authoritative tone - excellent for dramatic narration',
+    gender: VoiceGender.MALE,
   },
   [VoiceName.FENRIR]: {
     name: 'Fenrir',
@@ -72,6 +77,7 @@ export const ELEVENLABS_VOICES: Record<
       Language.MALAYALAM,
     ],
     description: 'Gentle, soothing tone - perfect for relaxing listen sessions',
+    gender: VoiceGender.MALE,
   },
 };
 
@@ -149,21 +155,27 @@ export async function generateSpeechWithElevenLabs(
   text: string,
   voiceType: VoiceName,
   language: Language,
-  narrationType: 'Realistic' | 'Dramatic' | 'Educational'
+  narrationType: 'Realistic' | 'Dramatic' | 'Educational',
+  voiceGender: VoiceGender = VoiceGender.AUTO
 ): Promise<string> {
   try {
     const voiceSettings = NARRATION_SETTINGS[narrationType] || NARRATION_SETTINGS.Realistic;
-    const voice = ELEVENLABS_VOICES[voiceType];
+    const preferredVoices = getVoicesForLanguage(language, voiceGender);
+    const languageVoices = getVoicesForLanguage(language, VoiceGender.AUTO);
+    const resolvedVoiceType = preferredVoices.includes(voiceType)
+      ? voiceType
+      : preferredVoices[0] || languageVoices[0] || VoiceName.FENRIR;
+    const voice = ELEVENLABS_VOICES[resolvedVoiceType];
 
     if (!voice) {
-      console.error(`Voice ${voiceType} not found in ElevenLabs configuration`);
+      console.error(`Voice ${resolvedVoiceType} not found in ElevenLabs configuration`);
       return '';
     }
 
     // Check language support
     if (!voice.languages.includes(language)) {
       console.warn(
-        `Language ${language} not supported by voice ${voiceType}, falling back to ENGLISH`
+        `Language ${language} not supported by voice ${resolvedVoiceType}, falling back to ENGLISH`
       );
     }
 
@@ -184,8 +196,9 @@ export async function generateSpeechWithElevenLabs(
         status: res.status,
         statusText: res.statusText,
         response: payload,
-        voiceType,
+        voiceType: resolvedVoiceType,
         language,
+        voiceGender,
       });
       return '';
     }
@@ -200,6 +213,15 @@ export async function generateSpeechWithElevenLabs(
 
 export function getVoicesForLanguage(language: Language): VoiceName[] {
   return VOICE_BY_LANGUAGE[language] || [VoiceName.FENRIR];
+}
+
+export function getVoicesForLanguageAndGender(
+  language: Language,
+  gender: VoiceGender = VoiceGender.AUTO
+): VoiceName[] {
+  const voices = getVoicesForLanguage(language);
+  if (gender === VoiceGender.AUTO) return voices;
+  return voices.filter((voiceName) => ELEVENLABS_VOICES[voiceName]?.gender === gender);
 }
 
 export function decodeAudio(base64: string): Uint8Array {

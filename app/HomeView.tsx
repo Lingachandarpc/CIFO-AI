@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre, VoiceGender } from './types';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, GlobeIcon } from '../components/Icons';
 import SettingsModal from '../components/SettingsModal';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
-import { generateSpeechWithElevenLabs, getVoicesForLanguage } from './services/elevenLabsService';
+import { generateSpeechWithElevenLabs, getVoicesForLanguageAndGender } from './services/elevenLabsService';
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService, updateMusicVolume } from './services/backgroundMusicService';
 
 export default function HomeView() {
@@ -34,6 +34,7 @@ export default function HomeView() {
     narrationTime: 5,
     narrationType: 'Realistic',
     voiceType: VoiceName.ZEPHYR,
+    voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
     ttsProvider: TextToSpeechProvider.ELEVENLABS,
     enableBackgroundMusic: true,
@@ -43,6 +44,8 @@ export default function HomeView() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const getHistoryStorageKey = (id: number | null) =>
+    id ? `narrative_history_${id}` : 'narrative_history_guest';
 
   // Auto-save settings when they change
   useEffect(() => {
@@ -94,6 +97,7 @@ export default function HomeView() {
   const lastListenQueryRef = useRef<string>('');
   const activeListenSessionIdRef = useRef<string | null>(null);
   const pendingContinuationRef = useRef(false);
+  const handleListenTranscriptRef = useRef<(transcript: string) => void>(() => {});
 
   const startRecognition = (continuous: boolean) => {
     if (!recognitionRef.current) return;
@@ -132,7 +136,7 @@ export default function HomeView() {
             pendingContinuationRef.current = true;
             setPendingContinuation(true);
           }
-          void handleListenTranscript(transcript.trim());
+          void handleListenTranscriptRef.current(transcript.trim());
         } else {
           setInputValue(prev => prev ? `${prev} ${transcript}` : transcript);
         }
@@ -156,15 +160,38 @@ export default function HomeView() {
   useEffect(() => {
     if (status === 'loading') return;
 
-    const loadLocalHistory = () => {
-      const savedHistory = localStorage.getItem('narrative_history');
+    const loadLocalHistory = (id: number | null) => {
+      const savedHistory = localStorage.getItem(getHistoryStorageKey(id));
       if (savedHistory) {
         setHistory(hydrateHistory(JSON.parse(savedHistory)));
+      } else {
+        setHistory([]);
       }
     };
 
+    const migrateGuestHistory = (id: number) => {
+      const guestKey = getHistoryStorageKey(null);
+      const userKey = getHistoryStorageKey(id);
+      const guestHistoryRaw = localStorage.getItem(guestKey);
+      if (!guestHistoryRaw) return;
+
+      const guestHistory = hydrateHistory(JSON.parse(guestHistoryRaw));
+      const userHistoryRaw = localStorage.getItem(userKey);
+      const userHistory = userHistoryRaw ? hydrateHistory(JSON.parse(userHistoryRaw)) : [];
+
+      if (guestHistory.length === 0) return;
+
+      const merged = [...guestHistory, ...userHistory].slice(0, 40);
+      const deduped = merged.reduce<HistoryItem[]>((acc, item) => {
+        if (!acc.find((entry) => entry.id === item.id)) acc.push(item);
+        return acc;
+      }, []).slice(0, 20);
+      localStorage.setItem(userKey, JSON.stringify(deduped));
+      localStorage.removeItem(guestKey);
+      setHistory(deduped);
+    };
+
     const checkAuthAndLoadSettings = async () => {
-      loadLocalHistory();
       try {
         const authRes = await fetch('/api/chronoread/auth-check', {
           cache: 'no-store',
@@ -175,6 +202,8 @@ export default function HomeView() {
         if (authData.authenticated && authData.user?.id) {
           setAuthCheckAuthenticated(true);
           setUserId(authData.user.id);
+          loadLocalHistory(authData.user.id);
+          migrateGuestHistory(authData.user.id);
 
           // Load user settings
           const settingsRes = await fetch('/api/chronoread/settings', {
@@ -188,6 +217,7 @@ export default function HomeView() {
               narrationTime: settingsData.settings.narrationTime || 5,
               narrationType: settingsData.settings.narrationType || 'Realistic',
               voiceType: settingsData.settings.voiceType || VoiceName.ZEPHYR,
+              voiceGender: settingsData.settings.voiceGender || VoiceGender.AUTO,
               language: settingsData.settings.language || Language.ENGLISH,
               ttsProvider: settingsData.settings.ttsProvider || TextToSpeechProvider.ELEVENLABS,
               enableBackgroundMusic: settingsData.settings.enableBackgroundMusic !== undefined ? settingsData.settings.enableBackgroundMusic : true,
@@ -206,10 +236,12 @@ export default function HomeView() {
           }
         } else {
           setAuthCheckAuthenticated(false);
+          loadLocalHistory(null);
         }
       } catch (error) {
         console.error('Error checking authentication:', error);
         setAuthCheckAuthenticated(false);
+        loadLocalHistory(null);
       }
     };
 
@@ -219,6 +251,10 @@ export default function HomeView() {
   useEffect(() => {
     interactionModeRef.current = interactionMode;
     if (interactionMode === "listen") {
+      initAudio();
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
       setListenStatus("listening");
       startMicAnalyser();
       setRecognitionLanguage();
@@ -232,6 +268,17 @@ export default function HomeView() {
       activeListenSessionIdRef.current = null;
     }
   }, [interactionMode]);
+
+  useEffect(() => {
+    const availableVoices = getVoicesForLanguageAndGender(settings.language, settings.voiceGender);
+    if (availableVoices.length === 0) return;
+    if (!availableVoices.includes(settings.voiceType)) {
+      setSettings((prev) => ({
+        ...prev,
+        voiceType: availableVoices[0],
+      }));
+    }
+  }, [settings.language, settings.voiceGender, settings.voiceType]);
 
   useEffect(() => {
     setRecognitionLanguage();
@@ -340,8 +387,27 @@ export default function HomeView() {
     return Math.sqrt(sum / data.length);
   };
 
+  const getTtsExcerpt = (text: string, mode: "read" | "listen") => {
+    const base = mode === "listen" ? 1600 : 1000;
+    const perMinute = mode === "listen" ? 500 : 350;
+    const maxChars = Math.min(6000, Math.max(800, base + settings.narrationTime * perMinute));
+    return text.length > maxChars ? text.slice(0, maxChars) : text;
+  };
+
+  const dedupeHistory = (items: HistoryItem[]) => {
+    const seen = new Set<string>();
+    const deduped: HistoryItem[] = [];
+    for (const item of items) {
+      if (!item?.id) continue;
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      deduped.push(item);
+    }
+    return deduped;
+  };
+
   const hydrateHistory = (items: HistoryItem[]) => {
-    return items.map((item) => ({
+    const mapped = items.map((item) => ({
       ...item,
       timestamp: new Date(item.timestamp),
       interactionMode: item.interactionMode || "read",
@@ -350,6 +416,7 @@ export default function HomeView() {
         timestamp: new Date(entry.timestamp),
       })),
     }));
+    return dedupeHistory(mapped);
   };
 
   const persistHistory = (items: HistoryItem[]) => {
@@ -372,7 +439,7 @@ export default function HomeView() {
 
     for (const attempt of attempts) {
       try {
-        localStorage.setItem('narrative_history', JSON.stringify(buildPayload(attempt)));
+        localStorage.setItem(getHistoryStorageKey(userId), JSON.stringify(buildPayload(attempt)));
         return;
       } catch {}
     }
@@ -406,7 +473,7 @@ export default function HomeView() {
       } else {
         updated = [item, ...prev];
       }
-      const trimmed = updated.slice(0, 20);
+      const trimmed = dedupeHistory(updated).slice(0, 20);
       persistHistory(trimmed);
       return trimmed;
     });
@@ -415,6 +482,11 @@ export default function HomeView() {
   const handlePlayAudio = async (base64: string, options?: { listenMode?: boolean; genre?: string | null }) => {
     initAudio();
     if (!audioContextRef.current) return;
+    if (audioContextRef.current.state === 'suspended') {
+      try {
+        await audioContextRef.current.resume();
+      } catch {}
+    }
 
     // Stop any previously playing source
     if (currentSourceRef.current) {
@@ -461,14 +533,15 @@ export default function HomeView() {
    */
   const generateNarrationAudio = async (text: string): Promise<string> => {
     if (settings.ttsProvider === TextToSpeechProvider.ELEVENLABS) {
-      return (
-        (await generateSpeechWithElevenLabs(
-          text,
-          settings.voiceType,
-          settings.language,
-          settings.narrationType
-        )) || ''
+      const elevenLabsAudio = await generateSpeechWithElevenLabs(
+        text,
+        settings.voiceType,
+        settings.language,
+        settings.narrationType,
+        settings.voiceGender
       );
+      if (elevenLabsAudio) return elevenLabsAudio;
+      return (await generateSpeech(text, settings.voiceType)) || '';
     } else {
       return (await generateSpeech(text, settings.voiceType)) || '';
     }
@@ -476,7 +549,7 @@ export default function HomeView() {
 
   const narrateHistoryItem = async (item: HistoryItem) => {
     if (!item.response) return;
-    const audioBase64 = item.audioBlob || await generateNarrationAudio(item.response.slice(0, 1200)) || '';
+    const audioBase64 = item.audioBlob || await generateNarrationAudio(getTtsExcerpt(item.response, "listen")) || '';
     if (audioBase64) {
       handlePlayAudio(audioBase64, { listenMode: true, genre: item.genre || null });
       if (!item.audioBlob) {
@@ -525,7 +598,7 @@ export default function HomeView() {
       pendingContinuationRef.current = false;
       setPendingContinuation(false);
 
-      const audioBase64 = await generateNarrationAudio(cleanedText.slice(0, 1200)) || '';
+      const audioBase64 = await generateNarrationAudio(getTtsExcerpt(cleanedText, "listen")) || '';
       if (audioBase64) {
         handlePlayAudio(audioBase64, { listenMode: true, genre: genre || null });
       }
@@ -612,7 +685,7 @@ export default function HomeView() {
       
       let audioBase64 = '';
       if (!narrativeText.toLowerCase().includes("search in books instead")) {
-        audioBase64 = await generateNarrationAudio(narrativeText.slice(0, 1000)) || '';
+        audioBase64 = await generateNarrationAudio(getTtsExcerpt(narrativeText, "read")) || '';
       }
 
       const assistantMsg: ChatMessage = {
@@ -722,7 +795,7 @@ export default function HomeView() {
       const { cleanedText, genre, suggestion } = extractListenMetadata(narrativeText);
       lastNarrationRef.current = cleanedText;
 
-      const audioBase64 = await generateNarrationAudio(cleanedText.slice(0, 1200)) || '';
+      const audioBase64 = await generateNarrationAudio(getTtsExcerpt(cleanedText, "listen")) || '';
       if (audioBase64) {
         handlePlayAudio(audioBase64, { listenMode: true, genre: genre || null });
       }
@@ -796,6 +869,10 @@ export default function HomeView() {
       }
     }
   }
+
+  useEffect(() => {
+    handleListenTranscriptRef.current = handleListenTranscript;
+  }, [handleListenTranscript]);
 
   if (status === 'loading') {
     return (

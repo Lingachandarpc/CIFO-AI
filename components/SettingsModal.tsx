@@ -1,6 +1,6 @@
 import React from 'react';
-import { Settings, VoiceName, Language, TextToSpeechProvider } from '../app/types';
-import { ELEVENLABS_VOICES, getVoicesForLanguage } from '../app/services/elevenLabsService';
+import { Settings, VoiceName, Language, TextToSpeechProvider, VoiceGender } from '../app/types';
+import { ELEVENLABS_VOICES, getVoicesForLanguageAndGender } from '../app/services/elevenLabsService';
 
 interface SettingsModalProps {
   settings: Settings;
@@ -9,7 +9,7 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ settings, onSettingsChange, onClose }: SettingsModalProps) {
-  const availableVoices = getVoicesForLanguage(settings.language);
+  const availableVoices = getVoicesForLanguageAndGender(settings.language, settings.voiceGender);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -71,6 +71,29 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
 
         {/* Voice Selection */}
         <div className="mb-6">
+          <label className="block text-sm font-semibold text-gray-300 mb-2">
+            Voice Gender
+          </label>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[VoiceGender.AUTO, VoiceGender.FEMALE, VoiceGender.MALE].map((gender) => (
+              <button
+                key={gender}
+                onClick={() =>
+                  onSettingsChange({
+                    ...settings,
+                    voiceGender: gender,
+                  })
+                }
+                className={`p-2 rounded transition-all text-sm font-medium capitalize ${
+                  settings.voiceGender === gender
+                    ? 'bg-lime-400 text-gray-900'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {gender}
+              </button>
+            ))}
+          </div>
           <label className="block text-sm font-semibold text-gray-300 mb-2">
             Voice Persona
           </label>

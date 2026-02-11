@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, VoiceGender } from './types';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, GlobeIcon } from '../components/Icons';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
 
@@ -17,6 +17,7 @@ export default function Home() {
     narrationTime: 5,
     narrationType: 'Realistic',
     voiceType: VoiceName.ZEPHYR,
+    voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
     ttsProvider: 'elevenlabs' as any,
     enableBackgroundMusic: true,
@@ -124,7 +125,7 @@ export default function Home() {
   }, [messages]);
 
   useEffect(() => {
-    const savedHistory = localStorage.getItem('narrative_history');
+    const savedHistory = localStorage.getItem('narrative_history_guest');
     if (savedHistory) {
       const parsed = JSON.parse(savedHistory) as HistoryItem[];
       setHistory(parsed.map((item) => ({
@@ -144,7 +145,7 @@ export default function Home() {
     };
     const updatedHistory = [newItem, ...history].slice(0, 10);
     setHistory(updatedHistory);
-    localStorage.setItem('narrative_history', JSON.stringify(updatedHistory));
+    localStorage.setItem('narrative_history_guest', JSON.stringify(updatedHistory));
   };
 
   const handlePlayAudio = async (base64: string) => {

@@ -1,5 +1,5 @@
 import prisma from '../../lib/prisma'
-import { Settings, SearchMode, VoiceName, Language } from '../types'
+import { Settings, SearchMode, VoiceName, Language, VoiceGender } from '../types'
 
 /**
  * UserService: Manages user profiles, settings, and chat history.
@@ -18,6 +18,7 @@ export async function getUserSettings(userId: number): Promise<Settings | null> 
       narrationTime: settings.narrationTime,
       narrationType: settings.narrationType as Settings['narrationType'],
       voiceType: settings.voiceType as VoiceName,
+      voiceGender: (settings.voiceGender as VoiceGender) || VoiceGender.AUTO,
       language: settings.language as Language,
       ttsProvider: (settings.ttsProvider as any) || 'elevenlabs',
       enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
@@ -34,35 +35,84 @@ export async function updateUserSettings(
   settings: Partial<Settings>
 ): Promise<void> {
   try {
+    const createData = {
+      userId,
+      narrationTime: settings.narrationTime ?? 5,
+      narrationType: settings.narrationType ?? 'Realistic',
+      voiceType: settings.voiceType ?? 'zephyr',
+      voiceGender: settings.voiceGender ?? 'auto',
+      language: settings.language ?? 'English',
+      ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+      enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
+      backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
+    };
+
+    const updateData = {
+      ...(settings.narrationTime !== undefined && {
+        narrationTime: settings.narrationTime,
+      }),
+      ...(settings.narrationType && { narrationType: settings.narrationType }),
+      ...(settings.voiceType && { voiceType: settings.voiceType }),
+      ...(settings.voiceGender && { voiceGender: settings.voiceGender }),
+      ...(settings.language && { language: settings.language }),
+      ...(settings.ttsProvider && { ttsProvider: settings.ttsProvider }),
+      ...(settings.enableBackgroundMusic !== undefined && {
+        enableBackgroundMusic: settings.enableBackgroundMusic,
+      }),
+      ...(settings.backgroundMusicVolume !== undefined && {
+        backgroundMusicVolume: settings.backgroundMusicVolume,
+      }),
+    };
+
     await prisma.userSettings.upsert({
       where: { userId },
-      create: {
-        userId,
-        narrationTime: settings.narrationTime ?? 5,
-        narrationType: settings.narrationType ?? 'Realistic',
-        voiceType: settings.voiceType ?? 'zephyr',
-        language: settings.language ?? 'English',
-        ttsProvider: settings.ttsProvider ?? 'elevenlabs',
-        enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
-        backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
-      },
-      update: {
-        ...(settings.narrationTime !== undefined && {
-          narrationTime: settings.narrationTime,
-        }),
-        ...(settings.narrationType && { narrationType: settings.narrationType }),
-        ...(settings.voiceType && { voiceType: settings.voiceType }),
-        ...(settings.language && { language: settings.language }),
-        ...(settings.ttsProvider && { ttsProvider: settings.ttsProvider }),
-        ...(settings.enableBackgroundMusic !== undefined && {
-          enableBackgroundMusic: settings.enableBackgroundMusic,
-        }),
-        ...(settings.backgroundMusicVolume !== undefined && {
-          backgroundMusicVolume: settings.backgroundMusicVolume,
-        }),
-      },
+      create: createData,
+      update: updateData,
     })
   } catch (error) {
+    const message = String((error as { message?: string })?.message || error);
+    const isVoiceGenderMismatch = message.toLowerCase().includes('voicegender');
+    if (isVoiceGenderMismatch) {
+      try {
+        const fallbackCreate = { ...settings } as Record<string, unknown>;
+        delete fallbackCreate.voiceGender;
+
+        const fallbackUpdate = { ...settings } as Record<string, unknown>;
+        delete fallbackUpdate.voiceGender;
+
+        await prisma.userSettings.upsert({
+          where: { userId },
+          create: {
+            userId,
+            narrationTime: settings.narrationTime ?? 5,
+            narrationType: settings.narrationType ?? 'Realistic',
+            voiceType: settings.voiceType ?? 'zephyr',
+            language: settings.language ?? 'English',
+            ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+            enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
+            backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
+          },
+          update: {
+            ...(settings.narrationTime !== undefined && {
+              narrationTime: settings.narrationTime,
+            }),
+            ...(settings.narrationType && { narrationType: settings.narrationType }),
+            ...(settings.voiceType && { voiceType: settings.voiceType }),
+            ...(settings.language && { language: settings.language }),
+            ...(settings.ttsProvider && { ttsProvider: settings.ttsProvider }),
+            ...(settings.enableBackgroundMusic !== undefined && {
+              enableBackgroundMusic: settings.enableBackgroundMusic,
+            }),
+            ...(settings.backgroundMusicVolume !== undefined && {
+              backgroundMusicVolume: settings.backgroundMusicVolume,
+            }),
+          },
+        })
+        return;
+      } catch (fallbackError) {
+        console.error('Fallback settings update failed:', fallbackError)
+      }
+    }
     console.error('Error updating user settings:', error)
   }
 }
