@@ -4,10 +4,6 @@ export const dynamic = "force-dynamic";
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
 const categories = ["Case Study", "Real Life Story", "Book"];
 
 type TopicWithImage = {
@@ -17,17 +13,30 @@ type TopicWithImage = {
 
 export async function GET() {
   try {
-    const res = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "Generate familiar, popular topics. Return STRICT JSON only.",
-        },
-        {
-          role: "user",
-          content: `
+    const key = process.env.OPENAI_API_KEY;
+    const openai = key ? new OpenAI({ apiKey: key }) : null;
+
+    let parsed: Record<string, string[]>;
+
+    if (!openai) {
+      // Fallback static topics when no API key is present — allows UI to run without consuming tokens
+      parsed = {
+        "Case Study": ["The Rise of Remote Work", "Sustainable Urban Farming", "AI in Healthcare", "Micro-entrepreneurship"],
+        "Real Life Story": ["A Teacher's Journey", "Startup Founder's Struggle", "A Community Rebuild", "From Hobby to Business"],
+        "Book": ["Atomic Habits", "Deep Work", "Sapiens", "The Alchemist"],
+      };
+    } else {
+      const res = await openai.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Generate familiar, popular topics. Return STRICT JSON only.",
+          },
+          {
+            role: "user",
+            content: `
 Return 4 topics for each category below.
 
 Categories:
@@ -40,45 +49,50 @@ JSON format:
   "Book": ["Topic 1", "Topic 2"]
 }
 `,
-        },
-      ],
-    });
+          },
+        ],
+      });
 
-    const raw = res.choices[0]?.message?.content;
-    if (!raw) throw new Error("Empty AI response");
-
-    const parsed = JSON.parse(raw) as Record<string, string[]>;
+      const raw = res.choices[0]?.message?.content;
+      if (!raw) throw new Error("Empty AI response");
+      parsed = JSON.parse(raw) as Record<string, string[]>;
+    }
 
     const result: Record<string, { title: string; image: string }[]> = {};
 
     for (const [category, titles] of Object.entries(parsed)) {
       result[category] = await Promise.all(
-  titles.map(async (title) => {
-    try {
-      // OpenAI image generation for poster
-      const imageRes = await openai.images.generate({
-        model: "gpt-image-1",
-        prompt: `${title} poster, ${category}, colorful, cinematic, eye-catching, high-quality graphic design`,
-        size: "1024x1024",
-      });
+        titles.map(async (title) => {
+          try {
+            if (!openai) {
+              return {
+                title,
+                image: `https://picsum.photos/seed/${encodeURIComponent(title)}/400/400`,
+              };
+            }
 
-      // Safely get URL with optional chaining and fallback
-      const imageUrl = imageRes?.data?.[0]?.url || `https://picsum.photos/seed/${encodeURIComponent(title)}/400/400`;
+            // OpenAI image generation for poster
+            // const imageRes = await openai.images.generate({
+            //   model: "gpt-image-1",
+            //   prompt: `${title} poster, ${category}, colorful, cinematic, eye-catching, high-quality graphic design`,
+            //   size: "1024x1024",
+            // });
 
-      return {
-        title,
-        image: imageUrl,
-      };
-    } catch (err) {
-      console.error(`Failed to generate image for ${title}:`, err);
-      return {
-        title,
-        image: `https://picsum.photos/seed/${encodeURIComponent(title)}/400/400`, // fallback
-      };
-    }
-  })
-);
+            const imageUrl = `https://picsum.photos/seed/${encodeURIComponent(title)}/400/400`;
 
+            return {
+              title,
+              image: imageUrl,
+            };
+          } catch (err) {
+            console.error(`Failed to generate image for ${title}:`, err);
+            return {
+              title,
+              image: `https://picsum.photos/seed/${encodeURIComponent(title)}/400/400`, // fallback
+            };
+          }
+        })
+      );
     }
 
     return NextResponse.json(result);

@@ -35,6 +35,13 @@ export default function NarrationModal({
           </button>
 
           <button
+            onClick={() => { try { speechSynthesis.cancel(); } catch {} }}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg"
+          >
+            ■ Stop
+          </button>
+
+          <button
             onClick={onClose}
             className="px-4 py-2 border rounded-lg"
           >

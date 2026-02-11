@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  password  String?  // For credentials provider (bcrypt hashed)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  accounts         Account[]
+  sessions         Session[]
+  profile          UserProfile?
+  settings         UserSettings?
+  chatHistory      ChatHistory[]
+}
+
+model Account {
+  id                 Int       @id @default(autoincrement())
+  userId             Int
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?
+  access_token       String?
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           Int      @id @default(autoincrement())
+  sessionToken String   @unique
+  userId       Int
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// User Profile - Extended user information for personalization
+model UserProfile {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  location  String?
+  interests String?  // JSON or comma-separated tags
+  pulse     String?  // User's unique vibe/personality descriptor
+  bio       String?
+  age       Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// User Settings - Narration preferences per user
+model UserSettings {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @unique
+  narrationTime Int      @default(5)     // minutes
+  narrationType String   @default("Realistic") // Realistic, Dramatic, Educational
+  voiceType     String   @default("zephyr")
+  language      String   @default("English")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Chat History - User interactions for learning preferences & personalization
+model ChatHistory {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  role       String   // "user" or "assistant"
+  content    String
+  mode       String?  // "BOOK" or "CASE_STUDY"
+  audioBlob  String?  // base64 encoded audio
+  timestamp  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([timestamp])
+}
+
+// User Insights - Derived data for personalization (optional, for analytics)
+model UserInsight {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique
+  topTopics       String?  // JSON: most queried topics
+  preferredMode   String?  // "BOOK" or "CASE_STUDY"
+  preferredVoice  String?
+  likeCount       Int      @default(0)
+  dislikeCount    Int      @default(0)
+  lastActiveAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+}

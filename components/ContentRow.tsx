@@ -17,7 +17,7 @@ export default function ContentRow({ title, items, onSelect }: Props) {
       <h2 className="text-lg font-semibold mb-3">{title}</h2>
 
       <div className="flex gap-4 overflow-x-auto">
-        {items.map((item) => (
+        {items?.map((item) => (
           <div
             key={item.title}
             onClick={() => onSelect(item)}
