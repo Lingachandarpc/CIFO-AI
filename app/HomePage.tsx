@@ -18,6 +18,9 @@ export default function Home() {
     narrationType: 'Realistic',
     voiceType: VoiceName.ZEPHYR,
     language: Language.ENGLISH,
+    ttsProvider: 'elevenlabs' as any,
+    enableBackgroundMusic: true,
+    backgroundMusicVolume: 0.15,
   });
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -123,7 +126,11 @@ export default function Home() {
   useEffect(() => {
     const savedHistory = localStorage.getItem('narrative_history');
     if (savedHistory) {
-      setHistory(JSON.parse(savedHistory));
+      const parsed = JSON.parse(savedHistory) as HistoryItem[];
+      setHistory(parsed.map((item) => ({
+        ...item,
+        interactionMode: item.interactionMode || "read",
+      })));
     }
   }, []);
 
@@ -133,6 +140,7 @@ export default function Home() {
       query,
       mode,
       timestamp: new Date(),
+      interactionMode: "read",
     };
     const updatedHistory = [newItem, ...history].slice(0, 10);
     setHistory(updatedHistory);

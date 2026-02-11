@@ -27,7 +27,7 @@ export async function GET() {
       };
     } else {
       const res = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
+        model: "gpt-3.5-turbo",
         messages: [
           {
             role: "system",

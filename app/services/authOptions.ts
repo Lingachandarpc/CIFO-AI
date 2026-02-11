@@ -1,4 +1,5 @@
 import { NextAuthOptions } from 'next-auth'
+import type { Adapter } from 'next-auth/adapters'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import GoogleProvider from 'next-auth/providers/google'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
@@ -56,34 +57,29 @@ const providers = [
   }),
 ]
 
-// Wrap Prisma adapter to add logging around session/account creation
-const rawAdapter = PrismaAdapter(prisma as any) as any
-const adapter = {
-  ...rawAdapter,
-  async createSession(data: any) {
-    try {
-      console.log('Adapter.createSession called with:', data?.sessionToken, data?.userId)
-      const res = await rawAdapter.createSession(data)
-      console.log('Adapter.createSession result id:', res?.id)
-      return res
-    } catch (err) {
-      console.error('Adapter.createSession error:', err)
-      throw err
-    }
-  },
-}
+const adapter = PrismaAdapter(prisma) as Adapter
 
 export const authOptions: NextAuthOptions = {
   adapter,
   providers,
+  trustHost: true,
+  useSecureCookies: process.env.NODE_ENV === 'production',
   session: {
-    strategy: 'database',
+    strategy: 'jwt',
   },
   pages: {
     signIn: '/auth/signin',
     error: '/auth/signin?error=AuthError',
   },
   callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id
+        token.email = user.email
+        token.name = user.name
+      }
+      return token
+    },
     async signIn({ user, account, profile }) {
       // Debug logging for sign-in attempts
       try {
@@ -117,10 +113,12 @@ export const authOptions: NextAuthOptions = {
         return `${baseUrl}/app`
       }
     },
-    async session({ session, user }) {
-      // Add user ID to session for credentials provider
+    async session({ session, user, token }) {
       if (session.user) {
-        session.user.id = user.id
+        const fallbackId = token?.id ?? user?.id
+        if (fallbackId) session.user.id = fallbackId
+        if (token?.email) session.user.email = token.email as string
+        if (token?.name) session.user.name = token.name as string | null
       }
       return session
     },

@@ -31,11 +31,33 @@ export enum VoiceName {
   FENRIR = "fenrir",
 }
 
+export enum TextToSpeechProvider {
+  OPENAI = "openai",
+  ELEVENLABS = "elevenlabs",
+}
+
+export enum Genre {
+  PERSONAL_FINANCE = "Personal Finance",
+  TECHNOLOGY = "Technology",
+  BUSINESS = "Business",
+  PSYCHOLOGY = "Psychology",
+  HEALTH = "Health",
+  HISTORY = "History",
+  SCIENCE = "Science",
+  SELF_HELP = "Self-Help",
+  FICTION = "Fiction",
+  BIOGRAPHY = "Biography",
+  DEFAULT = "Default",
+}
+
 export interface Settings {
   narrationTime: number;
   narrationType: "Realistic" | "Dramatic" | "Educational";
   voiceType: VoiceName;
   language: Language;
+  ttsProvider: TextToSpeechProvider;
+  enableBackgroundMusic: boolean;
+  backgroundMusicVolume: number; // 0.0 - 1.0
 }
 
 export interface ChatMessage {
@@ -52,4 +74,10 @@ export interface HistoryItem {
   query: string;
   mode: SearchMode;
   timestamp: Date;
+  interactionMode: "read" | "listen";
+  response?: string;
+  audioBlob?: string;
+  genre?: string;
+  suggestion?: string;
+  conversation?: Array<Pick<ChatMessage, "role" | "content" | "timestamp">>;
 }

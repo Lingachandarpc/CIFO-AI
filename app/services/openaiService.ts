@@ -1,4 +1,4 @@
-import { SearchMode, Settings, VoiceName } from '../types';
+import { SearchMode, Settings, VoiceName, Language, TextToSpeechProvider } from '../types';
 
 const API_BASE = '/api/chronoread';
 
@@ -6,7 +6,12 @@ export async function generateNarrative(
   query: string,
   mode: SearchMode,
   settings: Settings,
-  chatHistory: Array<{ role: string; content: string }>
+  chatHistory: Array<{ role: string; content: string }>,
+  interactionMode: "read" | "listen" = "read",
+  continuation?: {
+    previousNarration?: string;
+    userInterruption?: string;
+  }
 ): Promise<string> {
   try {
     const category = mode === SearchMode.BOOK ? 'Book' : mode === SearchMode.CASE_STUDY ? 'Case Study' : 'Ask';
@@ -19,6 +24,8 @@ export async function generateNarrative(
         narrationTime: settings.narrationTime,
         narrationType: settings.narrationType,
         language: settings.language,
+        interactionMode,
+        continuation,
       }),
     });
 
@@ -81,4 +88,66 @@ export async function getAudioBuffer(
 ): Promise<AudioBuffer> {
   const arrayBuffer = data.buffer as ArrayBuffer;
   return audioContext.decodeAudioData(arrayBuffer);
+}
+
+/**
+ * Transcribe audio to text using OpenAI Whisper API
+ * @param audioBlob - Audio blob to transcribe
+ * @param language - Optional language code (BCP-47 format)
+ * @returns Transcribed text
+ */
+export async function transcribeAudio(
+  audioBlob: Blob,
+  language?: Language
+): Promise<string> {
+  try {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
+    if (language) {
+      const langCode = getLanguageCode(language);
+      formData.append('language', langCode);
+    }
+
+    const res = await fetch(`${API_BASE}/stt`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      console.error('STT proxy error:', payload);
+      return '';
+    }
+
+    const data = await res.json();
+    return data.text || '';
+  } catch (error) {
+    console.error('Error transcribing audio:', error);
+    return '';
+  }
+}
+
+/**
+ * Convert Language enum to BCP-47 language code for Whisper API
+ */
+function getLanguageCode(language: Language): string {
+  const langMap: Record<Language, string> = {
+    [Language.ENGLISH]: 'en',
+    [Language.SPANISH]: 'es',
+    [Language.FRENCH]: 'fr',
+    [Language.GERMAN]: 'de',
+    [Language.CHINESE]: 'zh',
+    [Language.JAPANESE]: 'ja',
+    [Language.HINDI]: 'hi',
+    [Language.PORTUGUESE]: 'pt',
+    [Language.TAMIL]: 'ta',
+    [Language.TELUGU]: 'te',
+    [Language.MALAYALAM]: 'ml',
+    [Language.KANNADA]: 'kn',
+    [Language.BENGALI]: 'bn',
+    [Language.MARATHI]: 'mr',
+    [Language.GUJARATI]: 'gu',
+    [Language.PUNJABI]: 'pa',
+  };
+  return langMap[language] || 'en';
 }

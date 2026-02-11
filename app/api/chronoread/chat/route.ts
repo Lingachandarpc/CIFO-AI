@@ -7,6 +7,7 @@ import {
 import { SearchMode } from '../../../types'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,10 +71,13 @@ export async function GET() {
     const { getChatHistory } = await import('../../../services/userService')
     const history = await getChatHistory(user.id, 50)
 
-    return NextResponse.json({
-      success: true,
-      history,
-    })
+    return NextResponse.json(
+      {
+        success: true,
+        history,
+      },
+      { headers: { 'Cache-Control': 'no-store' } }
+    )
   } catch (error) {
     console.error('Error fetching chat history:', error)
     return NextResponse.json(

@@ -4,6 +4,7 @@ import { authOptions } from '../../../services/authOptions'
 import { getUserSettings, updateUserSettings } from '../../../services/userService'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
@@ -24,15 +25,21 @@ export async function GET() {
 
     const settings = await getUserSettings(user.id)
 
-    return NextResponse.json({
-      success: true,
-      settings: settings || {
-        narrationTime: 5,
-        narrationType: 'Realistic',
-        voiceType: 'zephyr',
-        language: 'English',
+    return NextResponse.json(
+      {
+        success: true,
+        settings: settings || {
+          narrationTime: 5,
+          narrationType: 'Realistic',
+          voiceType: 'zephyr',
+          language: 'English',
+          ttsProvider: 'elevenlabs',
+          enableBackgroundMusic: true,
+          backgroundMusicVolume: 0.15,
+        },
       },
-    })
+      { headers: { 'Cache-Control': 'no-store' } }
+    )
   } catch (error) {
     console.error('Error fetching settings:', error)
     return NextResponse.json(

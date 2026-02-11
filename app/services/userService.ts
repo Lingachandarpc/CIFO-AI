@@ -19,6 +19,9 @@ export async function getUserSettings(userId: number): Promise<Settings | null> 
       narrationType: settings.narrationType as Settings['narrationType'],
       voiceType: settings.voiceType as VoiceName,
       language: settings.language as Language,
+      ttsProvider: (settings.ttsProvider as any) || 'elevenlabs',
+      enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
+      backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
     }
   } catch (error) {
     console.error('Error fetching user settings:', error)
@@ -39,6 +42,9 @@ export async function updateUserSettings(
         narrationType: settings.narrationType ?? 'Realistic',
         voiceType: settings.voiceType ?? 'zephyr',
         language: settings.language ?? 'English',
+        ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+        enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
+        backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
       },
       update: {
         ...(settings.narrationTime !== undefined && {
@@ -47,6 +53,13 @@ export async function updateUserSettings(
         ...(settings.narrationType && { narrationType: settings.narrationType }),
         ...(settings.voiceType && { voiceType: settings.voiceType }),
         ...(settings.language && { language: settings.language }),
+        ...(settings.ttsProvider && { ttsProvider: settings.ttsProvider }),
+        ...(settings.enableBackgroundMusic !== undefined && {
+          enableBackgroundMusic: settings.enableBackgroundMusic,
+        }),
+        ...(settings.backgroundMusicVolume !== undefined && {
+          backgroundMusicVolume: settings.backgroundMusicVolume,
+        }),
       },
     })
   } catch (error) {

@@ -84,6 +84,9 @@ model UserSettings {
   narrationType String   @default("Realistic") // Realistic, Dramatic, Educational
   voiceType     String   @default("zephyr")
   language      String   @default("English")
+  ttsProvider   String   @default("elevenlabs") // openai or elevenlabs
+  enableBackgroundMusic Boolean @default(true)
+  backgroundMusicVolume Float   @default(0.15)  // 0.0 - 1.0
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

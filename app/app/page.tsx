@@ -1,7 +1,7 @@
 "use client";
 
-import Home from '../HomePage';
-import React from 'react';
+import Home from "../HomeView";
+import React from "react";
 
 export default function AppRootPage() {
   return <Home />;
