@@ -34,14 +34,14 @@ export async function generateNarrative(
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
       console.error('AI proxy error:', payload);
-      return 'Sorry — AI is unavailable right now.';
+      return { narration: 'Sorry — AI is unavailable right now.' };
     }
 
     const data = await res.json();
     return { narration: data.narration || '', modelUsed: data.modelUsed };
   } catch (error) {
     console.error('Error generating narrative (proxy):', error);
-    throw error;
+    return { narration: 'Sorry — AI is unavailable right now.' };
   }
 }
 
