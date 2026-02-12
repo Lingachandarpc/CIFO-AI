@@ -7,7 +7,6 @@ import prisma from '../../lib/prisma'
 import bcrypt from 'bcryptjs'
 
 const isGoogleEnabled =
-  process.env.NODE_ENV !== 'production' &&
   !!process.env.GOOGLE_CLIENT_ID &&
   !!process.env.GOOGLE_CLIENT_SECRET
 
@@ -57,7 +56,7 @@ const providers: NextAuthOptions['providers'] = [
 ]
 
 if (isGoogleEnabled) {
-  // Google OAuth (disabled in production until verified)
+  // Google OAuth (enabled when credentials are configured)
   providers.push(
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || '',

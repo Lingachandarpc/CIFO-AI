@@ -10,7 +10,7 @@ const getInitialTheme = () => {
   return prefersLight ? "light" : "dark";
 };
 
-export default function ThemeToggle() {
+export default function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, setTheme] = useState<"light" | "dark">(() => getInitialTheme());
 
   useEffect(() => {
@@ -29,7 +29,8 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggleTheme}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      className="fixed right-4 top-4 z-50 inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] shadow-sm transition-colors hover:bg-[var(--surface-strong)]"
+      aria-pressed={theme === "dark"}
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] shadow-sm transition-colors hover:bg-[var(--surface-strong)] ${className}`.trim()}
     >
       {theme === "dark" ? (
         <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

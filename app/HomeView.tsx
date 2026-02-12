@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre, VoiceGender } from './types';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon } from '../components/Icons';
+import ThemeToggle from '../components/ThemeToggle';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions } from './services/openaiService';
 import { generateSpeechWithElevenLabs, getVoicesForLanguageAndGender } from './services/elevenLabsService';
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
@@ -1027,6 +1028,10 @@ export default function HomeView() {
           <div className="px-3 py-1 flex items-center gap-2 text-[10px] text-[var(--muted)] uppercase tracking-widest">
             <span>{settings.language} Mode</span>
           </div>
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface-strong)] text-[var(--muted-strong)]">
+            <ThemeToggle className="h-8 w-8 shadow-none" />
+            <span className="text-sm font-semibold">Theme</span>
+          </div>
           <Link
             href="/settings"
             className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--surface-strong)] transition-colors text-[var(--muted-strong)]"
@@ -1064,8 +1069,8 @@ export default function HomeView() {
         </header>
 
         {isMobileMenuOpen && (
-          <div className="md:hidden fixed inset-0 z-50 bg-black/60">
-            <div className="absolute inset-y-0 right-0 w-80 max-w-[85vw] bg-[var(--background)] border-l border-[var(--border)] shadow-xl flex flex-col">
+          <div className="md:hidden fixed inset-0 z-50 bg-[var(--background)]">
+            <div className="absolute inset-0 w-full bg-[var(--background)] shadow-xl flex flex-col">
               <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
                 <span className="font-bold">Menu</span>
                 <button
@@ -1125,6 +1130,10 @@ export default function HomeView() {
                 <div className="px-3 py-1 flex items-center gap-2 text-[10px] text-[var(--muted)] uppercase tracking-widest">
                   <span>{settings.language} Mode</span>
                 </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface-strong)] text-[var(--muted-strong)]">
+                  <ThemeToggle className="h-8 w-8 shadow-none" />
+                  <span className="text-sm font-semibold">Theme</span>
+                </div>
                 <Link
                   href="/settings"
                   onClick={() => setIsMobileMenuOpen(false)}
@@ -1152,34 +1161,33 @@ export default function HomeView() {
 
         {/* Mode Toggle */}
         <div className="px-4 md:px-8 py-4 border-b border-[var(--border)]">
-          <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div className="max-w-3xl mx-auto flex flex-nowrap items-center justify-between gap-2 md:gap-3">
             <div className="inline-flex items-center bg-[var(--surface)] border border-[var(--border)] rounded-full p-1">
               <button
                 onClick={() => setInteractionMode("read")}
-                className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "read" ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                className={`px-3 py-1.5 md:px-4 md:py-2 rounded-full text-[9px] md:text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "read" ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
               >
                 Read
               </button>
               <button
                 onClick={() => setInteractionMode("listen")}
-                className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "listen" ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                className={`px-3 py-1.5 md:px-4 md:py-2 rounded-full text-[9px] md:text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "listen" ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
               >
                 Listen
               </button>
             </div>
 
             <div className="inline-flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Source</span>
               <div className="inline-flex items-center bg-[var(--surface)] border border-[var(--border)] rounded-full p-1">
                 <button
                   onClick={() => setSearchMode(SearchMode.BOOK)}
-                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.BOOK ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                  className={`px-2.5 py-1 md:px-3 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.BOOK ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
                 >
                   Books
                 </button>
                 <button
                   onClick={() => setSearchMode(SearchMode.CASE_STUDY)}
-                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.CASE_STUDY ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+                  className={`px-2.5 py-1 md:px-3 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.CASE_STUDY ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
                 >
                   Case Study
                 </button>
