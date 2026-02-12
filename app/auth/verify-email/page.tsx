@@ -44,13 +44,13 @@ function VerifyEmailContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
       <div className="w-full max-w-md text-center">
         {/* Header */}
         <div className="mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-lime-400 to-lime-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-lime-400/20">
+          <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
             <svg
-              className="w-8 h-8 text-black"
+              className="w-8 h-8 text-[var(--background)]"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -63,51 +63,51 @@ function VerifyEmailContent() {
               />
             </svg>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Verify your email</h1>
-          <p className="text-neutral-400">
-            We&apos;ve sent a magic link to <strong className="text-white">{email}</strong>
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Verify your email</h1>
+          <p className="text-[var(--muted)]">
+            We&apos;ve sent a magic link to <strong className="text-[var(--foreground)]">{email}</strong>
           </p>
         </div>
 
         {/* Instructions */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 mb-6 text-left space-y-4">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 mb-6 text-left space-y-4">
           <div className="flex gap-3">
-            <div className="w-6 h-6 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-              <svg className="w-4 h-4 text-lime-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-6 h-6 rounded-full bg-[var(--surface-strong)] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-4 h-4 text-[var(--foreground)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
-              <h3 className="text-white font-semibold mb-1">Check your inbox</h3>
-              <p className="text-neutral-400 text-sm">
+              <h3 className="text-[var(--foreground)] font-semibold mb-1">Check your inbox</h3>
+              <p className="text-[var(--muted)] text-sm">
                 Look for an email from Chronoread with a sign in link
               </p>
             </div>
           </div>
 
           <div className="flex gap-3">
-            <div className="w-6 h-6 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-              <svg className="w-4 h-4 text-lime-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-6 h-6 rounded-full bg-[var(--surface-strong)] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-4 h-4 text-[var(--foreground)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
-              <h3 className="text-white font-semibold mb-1">Click the link</h3>
-              <p className="text-neutral-400 text-sm">
+              <h3 className="text-[var(--foreground)] font-semibold mb-1">Click the link</h3>
+              <p className="text-[var(--muted)] text-sm">
                 Click any link in the email to sign in to your account
               </p>
             </div>
           </div>
 
           <div className="flex gap-3">
-            <div className="w-6 h-6 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-              <svg className="w-4 h-4 text-lime-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-6 h-6 rounded-full bg-[var(--surface-strong)] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-4 h-4 text-[var(--foreground)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
-              <h3 className="text-white font-semibold mb-1">Set up your profile</h3>
-              <p className="text-neutral-400 text-sm">
+              <h3 className="text-[var(--foreground)] font-semibold mb-1">Set up your profile</h3>
+              <p className="text-[var(--muted)] text-sm">
                 Complete your profile and narration preferences
               </p>
             </div>
@@ -115,15 +115,15 @@ function VerifyEmailContent() {
         </div>
 
         {/* Resend */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 mb-6">
-          <p className="text-neutral-400 text-sm mb-4">Didn&apos;t receive the email?</p>
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 mb-6">
+          <p className="text-[var(--muted)] text-sm mb-4">Didn&apos;t receive the email?</p>
           <button
             onClick={handleResend}
             disabled={!canResend}
             className={`w-full py-3 px-4 rounded-xl font-medium transition-all ${
               canResend
-                ? "bg-lime-400/10 border border-lime-400/50 text-lime-400 hover:bg-lime-400/20"
-                : "bg-neutral-800 border border-neutral-700 text-neutral-500 cursor-not-allowed"
+                ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
+                : "bg-[var(--surface-strong)] border border-[var(--border)] text-[var(--muted)] cursor-not-allowed"
             }`}
           >
             {canResend ? (
@@ -135,7 +135,7 @@ function VerifyEmailContent() {
             )}
           </button>
           {resendCount > 0 && (
-            <p className="text-xs text-neutral-500 mt-3">
+            <p className="text-xs text-[var(--muted)] mt-3">
               You&apos;ve requested {resendCount} resend{resendCount > 1 ? "s" : ""}
             </p>
           )}
@@ -143,24 +143,24 @@ function VerifyEmailContent() {
 
         {/* Change Email */}
         <div className="text-center">
-          <p className="text-neutral-400 text-sm mb-4">
+          <p className="text-[var(--muted)] text-sm mb-4">
             Wrong email address?
           </p>
           <Link
             href="/auth/signup"
-            className="inline-block py-2 px-4 bg-neutral-800 border border-neutral-700 text-white rounded-lg hover:bg-neutral-700 transition-colors font-medium"
+            className="inline-block py-2 px-4 bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] rounded-lg hover:bg-[var(--surface-strong)] transition-colors font-medium"
           >
             Create new account
           </Link>
         </div>
 
         {/* Support */}
-        <div className="mt-8 pt-8 border-t border-neutral-800">
-          <p className="text-xs text-neutral-600">
+        <div className="mt-8 pt-8 border-t border-[var(--border)]">
+          <p className="text-xs text-[var(--muted)]">
             Still having issues?{" "}
             <a
               href="mailto:support@chronoread.com"
-              className="text-lime-400 hover:text-lime-300 transition-colors"
+              className="text-[var(--foreground)] underline underline-offset-4 transition-colors"
             >
               Contact support
             </a>
@@ -175,8 +175,8 @@ export default function VerifyEmail() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4">
-          <div className="text-neutral-500 text-sm uppercase tracking-widest">Loading</div>
+        <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
+          <div className="text-[var(--muted)] text-sm uppercase tracking-widest">Loading</div>
         </div>
       }
     >

@@ -91,18 +91,18 @@ export default function SignUp() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
         <div className="w-full max-w-md text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-lime-400 to-lime-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-lime-400/20">
-            <svg className="w-8 h-8 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
+            <svg className="w-8 h-8 text-[var(--background)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Account Created!</h1>
-          <p className="text-neutral-400 mb-6">
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Account Created!</h1>
+          <p className="text-[var(--muted)] mb-6">
             Welcome <strong>{formData.name || formData.email}</strong>
           </p>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-[var(--muted)]">
             Signing you in and taking you to your profile setup...
           </p>
         </div>
@@ -111,30 +111,30 @@ export default function SignUp() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-lime-400 to-lime-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-lime-400/20">
-            <span className="text-2xl font-bold text-black">N</span>
+          <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
+            <span className="text-2xl font-bold text-[var(--background)]">N</span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Join Chronoread</h1>
-          <p className="text-neutral-400">
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Join Chronoread</h1>
+          <p className="text-[var(--muted)]">
             Create your neural narrative account
           </p>
         </div>
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-            <p className="text-red-400 text-sm">{error}</p>
+          <div className="mb-6 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl">
+            <p className="text-[var(--foreground)] text-sm">{error}</p>
           </div>
         )}
 
         {/* Sign Up Form */}
         <form onSubmit={handleSubmit} className="space-y-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-neutral-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
               Full Name
             </label>
             <input
@@ -143,13 +143,13 @@ export default function SignUp() {
               value={formData.name}
               onChange={handleChange}
               placeholder="Your name"
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
               disabled={isLoading}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-neutral-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
               Email Address
             </label>
             <input
@@ -159,13 +159,13 @@ export default function SignUp() {
               onChange={handleChange}
               placeholder="you@example.com"
               required
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
               disabled={isLoading}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-neutral-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
               Password
             </label>
             <input
@@ -175,16 +175,16 @@ export default function SignUp() {
               onChange={handleChange}
               placeholder="At least 8 characters"
               required
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
               disabled={isLoading}
             />
-            <p className="text-xs text-neutral-500 mt-1">
+            <p className="text-xs text-[var(--muted)] mt-1">
               Must be at least 8 characters long
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-neutral-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
               Confirm Password
             </label>
             <input
@@ -194,13 +194,13 @@ export default function SignUp() {
               onChange={handleChange}
               placeholder="Confirm your password"
               required
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
               disabled={isLoading}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-neutral-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
               Confirm Password
             </label>
             <input
@@ -210,7 +210,7 @@ export default function SignUp() {
               onChange={handleChange}
               placeholder="Confirm your password"
               required
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+              className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
               disabled={isLoading}
             />
           </div>
@@ -218,11 +218,11 @@ export default function SignUp() {
           <button
             type="submit"
             disabled={isLoading || !formData.email || !formData.password}
-            className="w-full py-3 px-4 bg-gradient-to-r from-lime-400 to-lime-500 text-black font-bold rounded-xl hover:from-lime-300 hover:to-lime-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105 active:scale-95"
+            className="w-full py-3 px-4 bg-[var(--foreground)] text-[var(--background)] font-bold rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105 active:scale-95"
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                <span className="w-4 h-4 border-2 border-[var(--background)] border-t-transparent rounded-full animate-spin"></span>
                 Creating account...
               </span>
             ) : (
@@ -236,10 +236,10 @@ export default function SignUp() {
             {/* Divider */}
             <div className="relative mb-6">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-neutral-700"></div>
+                <div className="w-full border-t border-[var(--border)]"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-black text-neutral-500">Or sign up with</span>
+                <span className="px-2 bg-[var(--background)] text-[var(--muted)]">Or sign up with</span>
               </div>
             </div>
 
@@ -248,7 +248,7 @@ export default function SignUp() {
               <button
                 onClick={handleGoogleSignUp}
                 disabled={isLoading}
-                className="w-full py-3 px-4 bg-neutral-800 border border-neutral-700 text-white font-medium rounded-xl hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] font-medium rounded-xl hover:bg-[var(--surface-strong)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 <svg
                   className="w-5 h-5"
@@ -269,11 +269,11 @@ export default function SignUp() {
 
         {/* Sign In Link */}
         <div className="text-center">
-          <p className="text-neutral-400 text-sm">
+          <p className="text-[var(--muted)] text-sm">
             Already have an account?{" "}
             <Link
               href="/auth/signin"
-              className="text-lime-400 hover:text-lime-300 font-medium transition-colors"
+              className="text-[var(--foreground)] underline underline-offset-4 font-medium transition-colors"
             >
               Sign in
             </Link>
@@ -281,8 +281,8 @@ export default function SignUp() {
         </div>
 
         {/* Help Text */}
-        <div className="mt-8 pt-8 border-t border-neutral-800">
-          <p className="text-xs text-neutral-600 text-center mb-3">
+        <div className="mt-8 pt-8 border-t border-[var(--border)]">
+          <p className="text-xs text-[var(--muted)] text-center mb-3">
             By signing up, you agree to our Terms of Service and Privacy Policy
           </p>
         </div>

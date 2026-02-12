@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   const openai = new OpenAI({ apiKey: key });
 
   try {
-    const { query, category, narrationTime, narrationType, language, interactionMode, continuation } = await req.json();
+    const { query, category, narrationTime, narrationType, language, interactionMode, continuation, chatHistory } = await req.json();
 
     const narrativeStyleGuide = {
       "Realistic": "Tell the story in a realistic, factual, and grounded manner with real-world examples.",
@@ -24,9 +24,19 @@ export async function POST(req: Request) {
     const timeDescription = narrationTime <= 2 ? "brief (under 2 minutes)" : narrationTime <= 5 ? "short (2-5 minutes)" : "medium-length (5+ minutes)";
 
     const isListenMode = interactionMode === 'listen';
-    const listenGuidance = `The response MUST be anchored in real-life case studies or books, with practical solutions referencing those sources. Use a natural spoken delivery with light human cues (soft chuckle, gentle pause, subtle emphasis) but do not overdo it.`;
+    const wordsPerMinute = isListenMode ? 150 : 130;
+    const targetWords = Math.max(120, narrationTime * wordsPerMinute);
+    const maxWords = Math.max(150, Math.round(targetWords * 1.1));
+    const listenGuidance = `Anchor the narration in real, verifiable sources. Do not invent events, characters, or citations. If the query is vague, acknowledge the ambiguity briefly and continue with grounded, general guidance relevant to the topic.`;
     const listenStructure = `Start with a first line: Genre: <one or two words>. Then narrate. End with "Suggested next: <similar book or case study>".`;
     const languageEnforcement = `You MUST respond only in ${language}. Do not include translations. Do not use English except for proper nouns. For listen mode, keep the tags "Genre:" and "Suggested next:" in English, but everything else must be in ${language}.`;
+
+    const formattedHistory = Array.isArray(chatHistory)
+      ? chatHistory
+          .slice(-6)
+          .map((entry: { role: string; content: string }) => `${entry.role}: ${entry.content}`)
+          .join('\n')
+      : '';
 
     const continuationPrompt = continuation?.previousNarration
       ? `Continue the narration without restarting. Prior narration:\n"""${continuation.previousNarration}"""\n` +
@@ -39,23 +49,30 @@ export async function POST(req: Request) {
     // If the user is in ASK mode, ask the model to first identify relevant books and case studies
     // that match the user's concern, then provide a short narrated response and a list of matches.
     const userPrompt = category === 'Ask'
-      ? `First, identify up to 5 relevant books or case studies (title + short reason) that match this concern: "${query}". Then provide a ${timeDescription} narrated summary addressing the concern, written in ${language} and the ${narrationType} style. Format: start with a short list of matches, then the narration.\n- ${languageEnforcement}`
-      : `Tell a ${timeDescription} engaging narration about:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- Keep the narration engaging, clear, and suitable for audio playback\n- ${languageEnforcement}`;
+      ? `Identify up to 5 relevant books or case studies (title + short reason) that match this concern: "${query}". Then provide a ${timeDescription} response addressing the concern, written in ${language} and the ${narrationType} style. Format: start with a short list of matches, then the narration.\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- ${languageEnforcement}`
+      : `Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- Do not invent sources or facts; stay grounded in known books or case studies related to the query. If the query is unclear, ask a brief clarifying question in one sentence while still giving a relevant, general answer.\n- Keep the narration engaging, clear, and suitable for audio playback\n- ${languageEnforcement}`;
 
-    const targetWords = Math.max(180, narrationTime * 130);
-    const listenPrompt = `${continuationPrompt}Tell a ${timeDescription} narration about:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Duration: approximately ${narrationTime} minutes (around ${targetWords} words)\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${listenStructure}\n- ${languageEnforcement}`;
+    const listenPrompt = `${continuationPrompt}Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${listenStructure}\n- ${languageEnforcement}`;
 
     const res = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         {
           role: "system",
-          content: `You are a great storyteller and narrative expert. You create engaging and personalized narrations. 
+          content: `You are a grounded narrator and research assistant. You answer the user's request directly using real sources and avoid fabrication.
 Style: ${narrationType}
 Language: ${language}
 ${styleInstruction}
 ${languageEnforcement}`,
         },
+        ...(formattedHistory
+          ? [
+              {
+                role: "user",
+                content: `Conversation context (most recent):\n${formattedHistory}`,
+              },
+            ]
+          : []),
         {
           role: "user",
           content: isListenMode ? listenPrompt : userPrompt,
@@ -82,6 +99,28 @@ ${languageEnforcement}`,
       const regex = scriptRegexByLanguage[language as keyof typeof scriptRegexByLanguage];
       if (!regex) return false;
       return !regex.test(text);
+    };
+
+    const trimToWordLimit = (text: string, limit: number, listenMode: boolean) => {
+      const normalized = text.trim();
+      if (!normalized) return text;
+      const words = normalized.split(/\s+/).filter(Boolean);
+      if (words.length <= limit && !listenMode) return text;
+
+      if (!listenMode) {
+        return words.slice(0, limit).join(' ');
+      }
+
+      const lines = normalized.split(/\r?\n/).filter((line) => line.trim().length > 0);
+      const genreLine = lines.find((line) => line.trim().toLowerCase().startsWith('genre:')) || '';
+      const suggestionLine = [...lines].reverse().find((line) => line.trim().toLowerCase().startsWith('suggested next:')) || '';
+      const bodyLines = lines.filter((line) => line !== genreLine && line !== suggestionLine);
+      const preservedWords = `${genreLine} ${suggestionLine}`.trim().split(/\s+/).filter(Boolean).length;
+      const remaining = Math.max(10, limit - preservedWords);
+      const bodyWords = bodyLines.join(' ').trim().split(/\s+/).filter(Boolean);
+      const trimmedBody = bodyWords.slice(0, remaining).join(' ');
+      const rebuilt = [genreLine, trimmedBody, suggestionLine].filter(Boolean).join('\n');
+      return rebuilt || normalized;
     };
 
     let finalNarration = initialNarration;
@@ -126,6 +165,8 @@ ${languageEnforcement}`,
         finalNarration = finalRetry.choices[0].message.content || finalNarration;
       }
     }
+
+    finalNarration = trimToWordLimit(finalNarration, maxWords, isListenMode);
 
     return NextResponse.json({
       narration: finalNarration,

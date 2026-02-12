@@ -12,20 +12,20 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
   const availableVoices = getVoicesForLanguageAndGender(settings.language, settings.voiceGender);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 border border-gray-700">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="relative bg-[var(--surface)] rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 border border-[var(--border)]">
         <button
           onClick={onClose}
           aria-label="Close settings"
-          className="absolute right-4 top-4 rounded-full border border-gray-600 bg-gray-900/70 px-2.5 py-1 text-sm font-semibold text-gray-200 hover:bg-gray-700"
+          className="absolute right-4 top-4 rounded-full border border-[var(--border)] bg-[var(--surface-strong)] px-2.5 py-1 text-sm font-semibold text-[var(--foreground)] hover:opacity-90"
         >
           X
         </button>
-        <h2 className="text-2xl font-bold text-lime-400 mb-6">Narration Settings</h2>
+        <h2 className="text-2xl font-bold text-[var(--foreground)] mb-6">Narration Settings</h2>
 
         {/* Text-to-Speech Provider */}
         <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
             Text-to-Speech Provider
           </label>
           <select
@@ -36,19 +36,19 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                 ttsProvider: e.target.value as TextToSpeechProvider,
               })
             }
-            className="w-full bg-gray-700 text-white border border-gray-600 rounded px-3 py-2 focus:outline-none focus:border-lime-400"
+            className="w-full bg-[var(--surface-strong)] text-[var(--foreground)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--muted-strong)]"
           >
             <option value={TextToSpeechProvider.ELEVENLABS}>ElevenLabs (Advanced)</option>
             <option value={TextToSpeechProvider.OPENAI}>OpenAI</option>
           </select>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-[var(--muted)] mt-1">
             ElevenLabs offers better voice quality and more language support
           </p>
         </div>
 
         {/* Language Selection */}
         <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
             Language
           </label>
           <select
@@ -59,7 +59,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                 language: e.target.value as Language,
               })
             }
-            className="w-full bg-gray-700 text-white border border-gray-600 rounded px-3 py-2 focus:outline-none focus:border-lime-400"
+            className="w-full bg-[var(--surface-strong)] text-[var(--foreground)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--muted-strong)]"
           >
             {Object.values(Language).map((value: string) => (
               <option key={value} value={value}>
@@ -71,7 +71,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
 
         {/* Voice Selection */}
         <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
             Voice Gender
           </label>
           <div className="grid grid-cols-3 gap-3 mb-4">
@@ -86,15 +86,15 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                 }
                 className={`p-2 rounded transition-all text-sm font-medium capitalize ${
                   settings.voiceGender === gender
-                    ? 'bg-lime-400 text-gray-900'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    ? 'bg-[var(--foreground)] text-[var(--background)]'
+                    : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:bg-[var(--surface)]'
                 }`}
               >
                 {gender}
               </button>
             ))}
           </div>
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
             Voice Persona
           </label>
           <div className="grid grid-cols-1 gap-3">
@@ -111,8 +111,8 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                   }
                   className={`p-3 rounded-lg text-left transition-all ${
                     settings.voiceType === voiceName
-                      ? 'bg-lime-400 text-gray-900 font-semibold'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      ? 'bg-[var(--foreground)] text-[var(--background)] font-semibold'
+                      : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:bg-[var(--surface)]'
                   }`}
                 >
                   <div className="font-semibold capitalize">{voice.name}</div>
@@ -122,13 +122,13 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
             })}
           </div>
           {availableVoices.length === 0 && (
-            <p className="text-xs text-red-400">No voices available for this language</p>
+            <p className="text-xs text-[var(--muted)]">No voices available for this language</p>
           )}
         </div>
 
         {/* Narration Type */}
         <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
             Narration Style
           </label>
           <div className="grid grid-cols-3 gap-3">
@@ -143,8 +143,8 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                 }
                 className={`p-2 rounded transition-all text-sm font-medium ${
                   settings.narrationType === type
-                    ? 'bg-lime-400 text-gray-900'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    ? 'bg-[var(--foreground)] text-[var(--background)]'
+                    : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:bg-[var(--surface)]'
                 }`}
               >
                 {type}
@@ -155,7 +155,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
 
         {/* Narration Duration */}
         <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
             Narration Duration: {settings.narrationTime} minutes
           </label>
           <input
@@ -169,12 +169,12 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                 narrationTime: parseInt(e.target.value),
               })
             }
-            className="w-full accent-lime-400"
+            className="w-full accent-[var(--foreground)]"
           />
         </div>
 
         {/* Background Music Settings */}
-        <div className="mb-6 p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+        <div className="mb-6 p-4 bg-[var(--surface-strong)] rounded-lg border border-[var(--border)]">
           <label className="flex items-center gap-2 mb-3">
             <input
               type="checkbox"
@@ -185,16 +185,16 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                   enableBackgroundMusic: e.target.checked,
                 })
               }
-              className="w-4 h-4 accent-lime-400 cursor-pointer"
+              className="w-4 h-4 accent-[var(--foreground)] cursor-pointer"
             />
-            <span className="text-sm font-semibold text-gray-300">
+            <span className="text-sm font-semibold text-[var(--muted-strong)]">
               Enable Genre-Specific Background Music
             </span>
           </label>
 
           {settings.enableBackgroundMusic && (
             <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted)] mb-2">
                 Music Volume: {Math.round(settings.backgroundMusicVolume * 100)}%
               </label>
               <input
@@ -209,15 +209,15 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                     backgroundMusicVolume: parseFloat(e.target.value),
                   })
                 }
-                className="w-full accent-lime-400"
+                className="w-full accent-[var(--foreground)]"
               />
             </div>
           )}
         </div>
 
         {/* Settings Info */}
-        <div className="mb-6 p-3 bg-blue-900/30 rounded-lg border border-blue-700 text-xs text-blue-200">
-          <p className="font-semibold mb-1">💡 Voice & Language Support</p>
+        <div className="mb-6 p-3 bg-[var(--surface-strong)] rounded-lg border border-[var(--border)] text-xs text-[var(--muted-strong)]">
+          <p className="font-semibold mb-1">Voice & Language Support</p>
           <p>
             Each voice supports specific languages. Your selected voice will auto-adjust to work with the chosen
             language for optimal pronunciation.
@@ -227,7 +227,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="w-full bg-lime-400 hover:bg-lime-500 text-gray-900 font-semibold py-2 rounded-lg transition-colors"
+          className="w-full bg-[var(--foreground)] hover:opacity-90 text-[var(--background)] font-semibold py-2 rounded-lg transition-colors"
         >
           Done
         </button>

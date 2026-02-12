@@ -2,13 +2,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre, VoiceGender } from './types';
-import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, GlobeIcon } from '../components/Icons';
-import SettingsModal from '../components/SettingsModal';
-import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
+import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon } from '../components/Icons';
+import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions } from './services/openaiService';
 import { generateSpeechWithElevenLabs, getVoicesForLanguageAndGender } from './services/elevenLabsService';
-import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService, updateMusicVolume } from './services/backgroundMusicService';
+import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
 
 export default function HomeView() {
   const router = useRouter();
@@ -16,15 +16,20 @@ export default function HomeView() {
   const [inputValue, setInputValue] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.BOOK);
   const [interactionMode, setInteractionMode] = useState<"read" | "listen">("read");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [listenStatus, setListenStatus] = useState<"idle" | "listening" | "thinking" | "narrating" | "paused">("idle");
+  const [listenStatus, setListenStatus] = useState<"idle" | "listening" | "thinking" | "narrating">("idle");
   const [pulse, setPulse] = useState(0);
   const [selectedHistory, setSelectedHistory] = useState<HistoryItem | null>(null);
-  const [pendingContinuation, setPendingContinuation] = useState(false);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNarrating, setIsNarrating] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(true);
+  const [readSuggestions, setReadSuggestions] = useState<string[]>([]);
+  const [listenSuggestions, setListenSuggestions] = useState<string[]>([]);
+  const [isLoadingReadSuggestions, setIsLoadingReadSuggestions] = useState(false);
+  const [isLoadingListenSuggestions, setIsLoadingListenSuggestions] = useState(false);
   const { status } = useSession();
   const [authCheckAuthenticated, setAuthCheckAuthenticated] = useState(false);
   const isSessionAuthenticated = status === 'authenticated';
@@ -93,10 +98,10 @@ export default function HomeView() {
   const ambientMusicRef = useRef<{ oscillators: OscillatorNode[]; gain: GainNode; filter: BiquadFilterNode } | null>(null);
   const interactionModeRef = useRef<"read" | "listen">("read");
   const isNarratingRef = useRef(false);
+  const isMicMutedRef = useRef(false);
   const lastNarrationRef = useRef<string>('');
   const lastListenQueryRef = useRef<string>('');
   const activeListenSessionIdRef = useRef<string | null>(null);
-  const pendingContinuationRef = useRef(false);
   const handleListenTranscriptRef = useRef<(transcript: string) => void>(() => {});
 
   const startRecognition = (continuous: boolean) => {
@@ -108,6 +113,11 @@ export default function HomeView() {
 
   const stopRecognition = () => {
     try { recognitionRef.current?.stop?.(); } catch {}
+  };
+
+  const setMicMuted = (muted: boolean) => {
+    isMicMutedRef.current = muted;
+    setIsMicMuted(muted);
   };
 
   // Initialize Speech Recognition
@@ -122,6 +132,9 @@ export default function HomeView() {
 
       recognitionRef.current.onstart = () => {
         setIsListening(true);
+        if (isNarratingRef.current) {
+          stopNarration();
+        }
         if (interactionModeRef.current === "listen") {
           setListenStatus("listening");
         }
@@ -131,11 +144,7 @@ export default function HomeView() {
         const transcript = event.results?.[0]?.[0]?.transcript || '';
         if (!transcript.trim()) return;
         if (interactionModeRef.current === "listen") {
-          if (isNarratingRef.current) {
-            stopNarration();
-            pendingContinuationRef.current = true;
-            setPendingContinuation(true);
-          }
+          if (isNarratingRef.current) stopNarration();
           void handleListenTranscriptRef.current(transcript.trim());
         } else {
           setInputValue(prev => prev ? `${prev} ${transcript}` : transcript);
@@ -149,8 +158,12 @@ export default function HomeView() {
 
       recognitionRef.current.onend = () => {
         setIsListening(false);
-        if (interactionModeRef.current === "listen") {
+        if (interactionModeRef.current === "listen" && !isMicMutedRef.current) {
           startRecognition(true);
+          return;
+        }
+        if (interactionModeRef.current !== "listen") {
+          setMicMuted(true);
         }
       };
     }
@@ -255,16 +268,21 @@ export default function HomeView() {
       if (audioContextRef.current?.state === 'suspended') {
         audioContextRef.current.resume().catch(() => {});
       }
-      setListenStatus("listening");
-      startMicAnalyser();
-      setRecognitionLanguage();
-      startRecognition(true);
+      if (isMicMutedRef.current) {
+        setMicMuted(false);
+      }
+      if (!isMicMutedRef.current) {
+        setListenStatus("listening");
+        startMicAnalyser();
+        setRecognitionLanguage();
+        startRecognition(true);
+      } else {
+        setListenStatus("idle");
+      }
     } else {
       stopRecognition();
       stopMicAnalyser();
       setListenStatus("idle");
-      pendingContinuationRef.current = false;
-      setPendingContinuation(false);
       activeListenSessionIdRef.current = null;
     }
   }, [interactionMode]);
@@ -310,14 +328,32 @@ export default function HomeView() {
     if (recognitionRef.current) recognitionRef.current.lang = langMap[settings.language] || 'en-US';
   };
 
-  const toggleListening = () => {
-    if (isListening) {
-      stopRecognition();
-    } else {
-      setIsListening(true);
-      setRecognitionLanguage();
-      startRecognition(false);
+  const toggleMic = () => {
+    if (interactionModeRef.current === "listen") {
+      if (isMicMutedRef.current) {
+        setMicMuted(false);
+        setRecognitionLanguage();
+        startMicAnalyser();
+        startRecognition(true);
+        setListenStatus("listening");
+      } else {
+        setMicMuted(true);
+        stopRecognition();
+        stopMicAnalyser();
+        setListenStatus("idle");
+      }
+      return;
     }
+
+    if (isListening) {
+      setMicMuted(true);
+      stopRecognition();
+      return;
+    }
+
+    setMicMuted(false);
+    setRecognitionLanguage();
+    startRecognition(false);
   };
 
   const initAudio = () => {
@@ -388,10 +424,11 @@ export default function HomeView() {
   };
 
   const getTtsExcerpt = (text: string, mode: "read" | "listen") => {
-    const base = mode === "listen" ? 1600 : 1000;
-    const perMinute = mode === "listen" ? 500 : 350;
-    const maxChars = Math.min(6000, Math.max(800, base + settings.narrationTime * perMinute));
-    return text.length > maxChars ? text.slice(0, maxChars) : text;
+    const wordsPerMinute = mode === "listen" ? 150 : 130;
+    const maxWords = Math.max(120, settings.narrationTime * wordsPerMinute);
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    if (words.length <= maxWords) return text;
+    return words.slice(0, maxWords).join(' ');
   };
 
   const dedupeHistory = (items: HistoryItem[]) => {
@@ -465,14 +502,9 @@ export default function HomeView() {
 
   const upsertHistoryItem = (item: HistoryItem) => {
     setHistory((prev) => {
-      const existingIndex = prev.findIndex((entry) => entry.id === item.id);
       let updated: HistoryItem[] = [];
-      if (existingIndex >= 0) {
-        updated = [...prev];
-        updated[existingIndex] = item;
-      } else {
-        updated = [item, ...prev];
-      }
+      const remaining = prev.filter((entry) => entry.id !== item.id);
+      updated = [item, ...remaining];
       const trimmed = dedupeHistory(updated).slice(0, 20);
       persistHistory(trimmed);
       return trimmed;
@@ -520,9 +552,7 @@ export default function HomeView() {
       narrationAnalyserRef.current = null;
       stopAmbientMusic();
       if (interactionModeRef.current === "listen") {
-        setListenStatus("listening");
-        pendingContinuationRef.current = false;
-        setPendingContinuation(false);
+        setListenStatus(isMicMutedRef.current ? "idle" : "listening");
         activeListenSessionIdRef.current = null;
       }
     };
@@ -571,74 +601,11 @@ export default function HomeView() {
     try { window.speechSynthesis.cancel(); } catch {}
   };
 
-  const pauseListenNarration = () => {
-    if (!isNarratingRef.current) return;
+  const handleStopNarration = () => {
     stopNarration();
-    pendingContinuationRef.current = true;
-    setPendingContinuation(true);
-    setListenStatus("paused");
-  };
-
-  const resumeListenNarration = async () => {
-    if (!pendingContinuationRef.current || isLoading) return;
-    setListenStatus("thinking");
-    setIsLoading(true);
-    try {
-      const narrativeText = await generateNarrative(
-        lastListenQueryRef.current || 'Continue the narration',
-        searchMode,
-        settings,
-        [],
-        "listen",
-        { previousNarration: lastNarrationRef.current }
-      );
-
-      const { cleanedText, genre, suggestion } = extractListenMetadata(narrativeText);
-      lastNarrationRef.current = cleanedText;
-      pendingContinuationRef.current = false;
-      setPendingContinuation(false);
-
-      const audioBase64 = await generateNarrationAudio(getTtsExcerpt(cleanedText, "listen")) || '';
-      if (audioBase64) {
-        handlePlayAudio(audioBase64, { listenMode: true, genre: genre || null });
-      }
-
-      pendingContinuationRef.current = false;
-      setPendingContinuation(false);
-
-      const now = new Date();
-      const historyId = activeListenSessionIdRef.current || Math.random().toString(36).substr(2, 9);
-      activeListenSessionIdRef.current = historyId;
-      const existingItem = history.find((entry) => entry.id === historyId);
-      const existingConversation: Array<Pick<ChatMessage, 'role' | 'content' | 'timestamp'>> = existingItem?.conversation?.map((entry) => ({
-        ...entry,
-        role: entry.role as 'user' | 'assistant',
-      })) || [];
-      const mergedConversation: Array<Pick<ChatMessage, 'role' | 'content' | 'timestamp'>> = [
-        ...existingConversation,
-        { role: 'assistant', content: cleanedText, timestamp: now },
-      ];
-
-      const historyItem: HistoryItem = {
-        id: historyId,
-        query: existingItem?.query || lastListenQueryRef.current || 'Listen session',
-        mode: searchMode,
-        interactionMode: "listen",
-        timestamp: now,
-        response: cleanedText,
-        audioBlob: audioBase64 || undefined,
-        genre,
-        suggestion,
-        conversation: mergedConversation,
-      };
-      upsertHistoryItem(historyItem);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-      if (!isNarratingRef.current) {
-        setListenStatus("listening");
-      }
+    if (interactionModeRef.current === "listen") {
+      setListenStatus(isMicMutedRef.current ? "idle" : "listening");
+      activeListenSessionIdRef.current = null;
     }
   };
 
@@ -659,13 +626,14 @@ export default function HomeView() {
     return { cleanedText: cleaned.trim(), genre, suggestion };
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
+  const submitQuery = async (query: string) => {
+    if (!query.trim() || isLoading) return;
 
     initAudio();
-    const userQuery = inputValue;
+    const userQuery = query;
     const currentMode = searchMode;
+    const historyId = Math.random().toString(36).substr(2, 9);
+    const requestTimestamp = new Date();
     setInputValue('');
     setIsLoading(true);
 
@@ -673,45 +641,63 @@ export default function HomeView() {
       id: Date.now().toString(),
       role: 'user',
       content: userQuery,
-      timestamp: new Date(),
+      timestamp: requestTimestamp,
       mode: currentMode,
     };
 
     setMessages(prev => [...prev, newUserMsg]);
+    setSelectedHistoryId(historyId);
+    setSelectedHistory(null);
+
+    const pendingHistoryItem: HistoryItem = {
+      id: historyId,
+      query: userQuery,
+      mode: currentMode,
+      interactionMode: "read",
+      timestamp: requestTimestamp,
+      response: undefined,
+      audioBlob: undefined,
+      conversation: [{ role: 'user', content: userQuery, timestamp: requestTimestamp }],
+    };
+    upsertHistoryItem(pendingHistoryItem);
+
+    if (isAuthenticated) {
+      fetch('/api/chronoread/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: 'user',
+          content: userQuery,
+          mode: currentMode === SearchMode.BOOK ? 'BOOK' : 'CASE_STUDY',
+        }),
+      }).catch((error) => console.error('Error saving user message:', error));
+    }
 
     try {
       const chatHistory = [...messages.slice(-5), newUserMsg].map(m => ({ role: m.role, content: m.content }));
       const narrativeText = await generateNarrative(userQuery, currentMode, settings, chatHistory);
       
-      let audioBase64 = '';
-      if (!narrativeText.toLowerCase().includes("search in books instead")) {
-        audioBase64 = await generateNarrationAudio(getTtsExcerpt(narrativeText, "read")) || '';
-      }
+      const audioBase64 = '';
 
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: narrativeText,
         timestamp: new Date(),
-        audioBlob: audioBase64,
+        audioBlob: undefined,
       };
 
       setMessages(prev => [...prev, assistantMsg]);
 
-      const historyItem: HistoryItem = {
-        id: Math.random().toString(36).substr(2, 9),
-        query: userQuery,
-        mode: currentMode,
-        interactionMode: "read",
-        timestamp: new Date(),
+      const updatedHistoryItem: HistoryItem = {
+        ...pendingHistoryItem,
         response: narrativeText,
-        audioBlob: audioBase64 || undefined,
         conversation: [
-          { role: 'user', content: userQuery, timestamp: new Date() },
+          { role: 'user', content: userQuery, timestamp: requestTimestamp },
           { role: 'assistant', content: narrativeText, timestamp: new Date() },
         ],
       };
-      upsertHistoryItem(historyItem);
+      upsertHistoryItem(updatedHistoryItem);
 
       // Save assistant message to database if authenticated
       if (isAuthenticated) {
@@ -727,21 +713,12 @@ export default function HomeView() {
         }).catch((error) => console.error('Error saving assistant message:', error));
       }
 
-      if (audioBase64) {
-        handlePlayAudio(audioBase64);
-      }
-
-      if (!narrativeText.toLowerCase().includes("search in books instead")) {
-        const perspectivePrompt: ChatMessage = {
-          id: (Date.now() + 2).toString(),
-          role: 'assistant',
-          content: settings.language === Language.ENGLISH 
-            ? "I hope you enjoyed the narration. What's your perspective on this story or case? How do you think we can align or adopt these lessons in the real world?"
-            : `I hope you enjoyed the narration in ${settings.language}. What's your perspective?`,
-          timestamp: new Date(),
-        };
-        setTimeout(() => setMessages(prev => [...prev, perspectivePrompt]), 1000);
-      }
+      const suggestionHistory = [...messages.slice(-4), newUserMsg, assistantMsg]
+        .map((entry) => ({ role: entry.role, content: entry.content }));
+      setIsLoadingReadSuggestions(true);
+      const suggestions = await generateSuggestions(userQuery, settings.language, suggestionHistory).catch(() => []);
+      setReadSuggestions(suggestions);
+      setIsLoadingReadSuggestions(false);
 
     } catch (error) {
       console.error(error);
@@ -757,20 +734,43 @@ export default function HomeView() {
     }
   };
 
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    await submitQuery(inputValue);
+  };
+
   async function handleListenTranscript(transcript: string) {
     if (!transcript.trim() || isLoading) return;
 
     initAudio();
     const currentMode = searchMode;
     const wasNarrating = isNarratingRef.current;
+    const requestTimestamp = new Date();
     if (!activeListenSessionIdRef.current) {
       lastListenQueryRef.current = transcript;
     }
     if (wasNarrating) {
       stopNarration();
-      pendingContinuationRef.current = true;
-      setPendingContinuation(true);
     }
+
+    let historyId = activeListenSessionIdRef.current;
+    if (!historyId) {
+      historyId = Math.random().toString(36).substr(2, 9);
+      activeListenSessionIdRef.current = historyId;
+    }
+
+    const pendingHistoryItem: HistoryItem = {
+      id: historyId,
+      query: transcript,
+      mode: currentMode,
+      interactionMode: "listen",
+      timestamp: requestTimestamp,
+      response: undefined,
+      audioBlob: undefined,
+      conversation: [{ role: 'user', content: transcript, timestamp: requestTimestamp }],
+    };
+    upsertHistoryItem(pendingHistoryItem);
+    setSelectedHistoryId(historyId);
 
     setListenStatus("thinking");
     setIsLoading(true);
@@ -802,15 +802,9 @@ export default function HomeView() {
 
       const now = new Date();
       const newConversation = [
-        { role: 'user' as const, content: transcript, timestamp: now },
+        { role: 'user' as const, content: transcript, timestamp: requestTimestamp },
         { role: 'assistant' as const, content: cleanedText, timestamp: new Date() },
       ];
-
-      let historyId = activeListenSessionIdRef.current;
-      if (!historyId) {
-        historyId = Math.random().toString(36).substr(2, 9);
-        activeListenSessionIdRef.current = historyId;
-      }
 
       const existingItem = history.find((entry) => entry.id === historyId);
       const existingConversation: Array<Pick<ChatMessage, 'role' | 'content' | 'timestamp'>> = existingItem?.conversation?.map((entry) => ({
@@ -824,7 +818,7 @@ export default function HomeView() {
 
       const historyItem: HistoryItem = {
         id: historyId,
-        query: existingItem?.query || transcript,
+        query: transcript,
         mode: currentMode,
         interactionMode: "listen",
         timestamp: now,
@@ -870,14 +864,79 @@ export default function HomeView() {
     }
   }
 
+  const handleReadSuggestionClick = (suggestion: string) => {
+    setInputValue(suggestion);
+    void submitQuery(suggestion);
+  };
+
+  const handleListenSuggestionClick = (suggestion: string) => {
+    if (selectedHistory) {
+      activeListenSessionIdRef.current = selectedHistory.id;
+      setSearchMode(selectedHistory.mode);
+    }
+    lastListenQueryRef.current = suggestion;
+    setInteractionMode("listen");
+    setSelectedHistory(null);
+    setTimeout(() => {
+      void handleListenTranscriptRef.current(suggestion);
+    }, 0);
+  };
+
+  const closeListenModal = () => {
+    handleStopNarration();
+    setSelectedHistory(null);
+  };
+
+  const loadReadHistory = (item: HistoryItem) => {
+    const conversation = item.conversation?.length
+      ? item.conversation
+      : [
+          { role: 'user' as const, content: item.query, timestamp: item.timestamp },
+          ...(item.response
+            ? [{ role: 'assistant' as const, content: item.response, timestamp: item.timestamp }]
+            : []),
+        ];
+
+    const mappedMessages: ChatMessage[] = conversation.map((entry, index) => ({
+      id: `${item.id}-${index}`,
+      role: entry.role,
+      content: entry.content,
+      timestamp: entry.timestamp,
+      mode: item.mode,
+    }));
+
+    setMessages(mappedMessages);
+    setInteractionMode("read");
+    setSearchMode(item.mode);
+    setInputValue('');
+  };
+
   useEffect(() => {
     handleListenTranscriptRef.current = handleListenTranscript;
   }, [handleListenTranscript]);
 
+  useEffect(() => {
+    if (!selectedHistory || selectedHistory.interactionMode !== "listen") {
+      setListenSuggestions([]);
+      return;
+    }
+
+    const historyContext = (selectedHistory.conversation || []).map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+    }));
+
+    setIsLoadingListenSuggestions(true);
+    generateSuggestions(selectedHistory.query, settings.language, historyContext)
+      .then((suggestions) => setListenSuggestions(suggestions))
+      .catch(() => setListenSuggestions([]))
+      .finally(() => setIsLoadingListenSuggestions(false));
+  }, [selectedHistory, settings.language]);
+
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-neutral-500 text-sm uppercase tracking-widest">Loading session</div>
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <div className="text-[var(--muted)] text-sm uppercase tracking-widest">Loading session</div>
       </div>
     );
   }
@@ -885,25 +944,25 @@ export default function HomeView() {
   // Conditional render for auth check
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-linear-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
         <div className="w-full max-w-md text-center">
-          <div className="w-16 h-16 bg-linear-to-br from-lime-400 to-lime-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-lime-400/20">
-            <span className="text-2xl font-bold text-black">N</span>
+          <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
+            <span className="text-2xl font-bold text-[var(--background)]">N</span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-4">Welcome to Chronoread</h1>
-          <p className="text-neutral-400 mb-8 text-lg">
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-4">Welcome to Chronoread</h1>
+          <p className="text-[var(--muted)] mb-8 text-lg">
             Explore books and case studies with AI-powered neural narratives
           </p>
           <div className="space-y-3">
             <button
               onClick={() => router.push('/auth/signin')}
-              className="w-full py-4 px-6 bg-linear-to-r from-lime-400 to-lime-500 text-black font-bold rounded-xl hover:from-lime-300 hover:to-lime-400 transition-all transform hover:scale-105 active:scale-95"
+              className="w-full py-4 px-6 bg-[var(--foreground)] text-[var(--background)] font-bold rounded-xl transition-all transform hover:scale-105 active:scale-95"
             >
               Sign In
             </button>
             <button
               onClick={() => router.push('/auth/signup')}
-              className="w-full py-4 px-6 bg-neutral-800 border border-neutral-700 text-white font-bold rounded-xl hover:bg-neutral-700 transition-all"
+              className="w-full py-4 px-6 bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] font-bold rounded-xl hover:bg-[var(--surface-strong)] transition-all"
             >
               Create Account
             </button>
@@ -914,48 +973,47 @@ export default function HomeView() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-black text-white font-sans overflow-hidden">
+    <div className="flex h-screen w-full bg-[var(--background)] text-[var(--foreground)] font-sans overflow-hidden">
       {/* Sidebar - History */}
-      <aside className="w-64 border-r border-neutral-800 hidden md:flex md:flex-col">
-        <div className="p-6 border-b border-neutral-800 flex items-center gap-3">
-          <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center">
-            <span className="text-black font-bold text-xl">X</span>
+      <aside className="w-64 border-r border-[var(--border)] hidden md:flex md:flex-col">
+        <div className="p-6 border-b border-[var(--border)] flex items-center gap-3">
+          <div className="w-8 h-8 bg-[var(--foreground)] rounded-md flex items-center justify-center">
+            <span className="text-[var(--background)] font-bold text-xl">X</span>
           </div>
           <span className="font-bold tracking-tight text-lg">NarrativeX</span>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="flex items-center gap-2 mb-4 text-neutral-400 text-xs font-semibold uppercase tracking-widest">
+          <div className="flex items-center gap-2 mb-4 text-[var(--muted)] text-xs font-semibold uppercase tracking-widest">
             <HistoryIcon className="w-4 h-4" />
             <span>Neural History</span>
           </div>
           <div className="space-y-1">
             {history.length === 0 ? (
-              <p className="text-neutral-600 text-sm italic">No recent explorations</p>
+              <p className="text-[var(--muted)] text-sm italic">No recent explorations</p>
             ) : (
               history.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => {
+                    setSelectedHistoryId(item.id);
                     if (item.interactionMode === "listen") {
                       setSelectedHistory(item);
                     } else {
-                      setInputValue(item.query);
-                      setSearchMode(item.mode);
+                      setSelectedHistory(null);
+                      loadReadHistory(item);
                     }
                   }}
-                  className="w-full text-left p-3 rounded-lg hover:bg-neutral-900 transition-colors text-sm text-neutral-300 truncate"
+                  className={`w-full text-left p-3 rounded-lg transition-colors text-sm truncate ${
+                    selectedHistoryId === item.id
+                      ? 'bg-[var(--surface-strong)] text-[var(--foreground)]'
+                      : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)] hover:text-[var(--foreground)] active:bg-[var(--surface-strong)]'
+                  }`}
+                  aria-current={selectedHistoryId === item.id}
                 >
                   <div className="flex items-center gap-2">
-                    {item.mode === SearchMode.BOOK ? (
-                      <BookIcon className="w-3 h-3 text-blue-400" />
-                    ) : item.mode === SearchMode.CASE_STUDY ? (
-                      <CaseStudyIcon className="w-3 h-3 text-purple-400" />
-                    ) : (
-                      <CaseStudyIcon className="w-3 h-3 text-purple-400" />
-                    )}
                     <span className="truncate">{item.query}</span>
-                    <span className="ml-auto text-[9px] uppercase tracking-widest text-neutral-500">
+                    <span className="ml-auto text-[9px] uppercase tracking-widest text-[var(--muted)]">
                       {item.interactionMode === "listen" ? "Listen" : "Read"}
                     </span>
                   </div>
@@ -965,21 +1023,20 @@ export default function HomeView() {
           </div>
         </div>
 
-        <div className="p-4 border-t border-neutral-800 flex flex-col gap-2">
-          <div className="px-3 py-1 flex items-center gap-2 text-[10px] text-neutral-500 uppercase tracking-widest">
-            <GlobeIcon className="w-3 h-3" />
+        <div className="p-4 border-t border-[var(--border)] flex flex-col gap-2">
+          <div className="px-3 py-1 flex items-center gap-2 text-[10px] text-[var(--muted)] uppercase tracking-widest">
             <span>{settings.language} Mode</span>
           </div>
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-neutral-900 transition-colors text-neutral-400"
+          <Link
+            href="/settings"
+            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--surface-strong)] transition-colors text-[var(--muted-strong)]"
           >
             <SettingsIcon />
             <span>Settings</span>
-          </button>
-          <button 
+          </Link>
+          <button
             onClick={() => signOut({ callbackUrl: '/auth/signin' })}
-            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-red-900/20 transition-colors text-red-400"
+            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--surface-strong)] transition-colors text-[var(--muted)] hover:text-[var(--foreground)]"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -990,43 +1047,139 @@ export default function HomeView() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative bg-black">
+      <main className="flex-1 flex flex-col relative bg-[var(--background)]">
         {/* Header (Mobile) */}
-        <header className="md:hidden p-4 border-b border-neutral-800 flex justify-between items-center">
+        <header className="md:hidden p-4 border-b border-[var(--border)] flex justify-between items-center">
           <span className="font-bold">NarrativeX</span>
-          <button onClick={() => setIsSettingsOpen(true)}><SettingsIcon /></button>
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(true)}
+            aria-label="Open menu"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition-colors hover:bg-[var(--surface-strong)]"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </header>
 
+        {isMobileMenuOpen && (
+          <div className="md:hidden fixed inset-0 z-50 bg-black/60">
+            <div className="absolute inset-y-0 right-0 w-80 max-w-[85vw] bg-[var(--background)] border-l border-[var(--border)] shadow-xl flex flex-col">
+              <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
+                <span className="font-bold">Menu</span>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  aria-label="Close menu"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition-colors hover:bg-[var(--surface-strong)]"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                <div className="flex items-center gap-2 mb-4 text-[var(--muted)] text-xs font-semibold uppercase tracking-widest">
+                  <HistoryIcon className="w-4 h-4" />
+                  <span>Neural History</span>
+                </div>
+                <div className="space-y-1">
+                  {history.length === 0 ? (
+                    <p className="text-[var(--muted)] text-sm italic">No recent explorations</p>
+                  ) : (
+                    history.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setSelectedHistoryId(item.id);
+                          if (item.interactionMode === "listen") {
+                            setSelectedHistory(item);
+                          } else {
+                            setSelectedHistory(null);
+                            loadReadHistory(item);
+                          }
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`w-full text-left p-3 rounded-lg transition-colors text-sm truncate ${
+                          selectedHistoryId === item.id
+                            ? 'bg-[var(--surface-strong)] text-[var(--foreground)]'
+                            : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)] hover:text-[var(--foreground)] active:bg-[var(--surface-strong)]'
+                        }`}
+                        aria-current={selectedHistoryId === item.id}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="truncate">{item.query}</span>
+                          <span className="ml-auto text-[9px] uppercase tracking-widest text-[var(--muted)]">
+                            {item.interactionMode === "listen" ? "Listen" : "Read"}
+                          </span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-[var(--border)] flex flex-col gap-2">
+                <div className="px-3 py-1 flex items-center gap-2 text-[10px] text-[var(--muted)] uppercase tracking-widest">
+                  <span>{settings.language} Mode</span>
+                </div>
+                <Link
+                  href="/settings"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--surface-strong)] transition-colors text-[var(--muted-strong)]"
+                >
+                  <SettingsIcon />
+                  <span>Settings</span>
+                </Link>
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    signOut({ callbackUrl: '/auth/signin' });
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-[var(--surface-strong)] transition-colors text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Mode Toggle */}
-        <div className="px-4 md:px-8 py-4 border-b border-neutral-900">
+        <div className="px-4 md:px-8 py-4 border-b border-[var(--border)]">
           <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex items-center bg-neutral-900/70 border border-neutral-800 rounded-full p-1">
+            <div className="inline-flex items-center bg-[var(--surface)] border border-[var(--border)] rounded-full p-1">
               <button
                 onClick={() => setInteractionMode("read")}
-                className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "read" ? 'bg-white text-black' : 'text-neutral-400 hover:text-white'}`}
+                className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "read" ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
               >
                 Read
               </button>
               <button
                 onClick={() => setInteractionMode("listen")}
-                className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "listen" ? 'bg-white text-black' : 'text-neutral-400 hover:text-white'}`}
+                className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${interactionMode === "listen" ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
               >
                 Listen
               </button>
             </div>
 
             <div className="inline-flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-widest text-neutral-500">Source</span>
-              <div className="inline-flex items-center bg-neutral-900/70 border border-neutral-800 rounded-full p-1">
+              <span className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Source</span>
+              <div className="inline-flex items-center bg-[var(--surface)] border border-[var(--border)] rounded-full p-1">
                 <button
                   onClick={() => setSearchMode(SearchMode.BOOK)}
-                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.BOOK ? 'bg-lime-400 text-black' : 'text-neutral-400 hover:text-white'}`}
+                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.BOOK ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
                 >
                   Books
                 </button>
                 <button
                   onClick={() => setSearchMode(SearchMode.CASE_STUDY)}
-                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.CASE_STUDY ? 'bg-lime-400 text-black' : 'text-neutral-400 hover:text-white'}`}
+                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${searchMode === SearchMode.CASE_STUDY ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
                 >
                   Case Study
                 </button>
@@ -1040,12 +1193,12 @@ export default function HomeView() {
             <div className="max-w-3xl mx-auto py-10 space-y-8">
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
-                  <div className="w-16 h-16 bg-neutral-900 rounded-2xl flex items-center justify-center border border-neutral-800">
+                  <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center border border-[var(--border)]">
                     <span className="text-3xl font-bold">N</span>
                   </div>
                   <div>
                     <h1 className="text-3xl font-bold mb-2">Narrate in {settings.language}</h1>
-                    <p className="text-neutral-500 max-w-sm mx-auto">Explore books or real-world cases with realistic neural voice interaction.</p>
+                    <p className="text-[var(--muted)] max-w-sm mx-auto">Explore books or real-world cases with realistic neural voice interaction.</p>
                   </div>
                 </div>
               )}
@@ -1054,22 +1207,22 @@ export default function HomeView() {
                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[85%] space-y-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                     <div className={`p-4 rounded-2xl text-[15px] leading-relaxed ${
-                      msg.role === 'user' 
-                        ? 'bg-neutral-900 border border-neutral-800 text-white' 
-                        : 'bg-transparent text-neutral-100'
+                      msg.role === 'user'
+                        ? 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)]'
+                        : 'bg-transparent text-[var(--foreground)]'
                     }`}>
                       {msg.content}
                       {msg.audioBlob && (
                         <button 
                           onClick={() => handlePlayAudio(msg.audioBlob!)}
-                          className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white text-black rounded-full text-xs font-bold hover:bg-neutral-200 transition-colors"
+                          className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-[var(--foreground)] text-[var(--background)] rounded-full text-xs font-bold hover:opacity-90 transition-colors"
                         >
                           <PlayIcon className="w-4 h-4" />
                           Listen Narration
                         </button>
                       )}
                     </div>
-                    <div className="text-[10px] text-neutral-600 px-2 flex items-center gap-2 uppercase tracking-tighter">
+                    <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-2 uppercase tracking-tighter">
                       {msg.role === 'assistant' ? 'NarrativeX' : 'You'} 
                       <span>•</span>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1079,12 +1232,32 @@ export default function HomeView() {
               ))}
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl animate-pulse">
+                  <div className="bg-[var(--surface)] border border-[var(--border)] p-4 rounded-2xl animate-pulse">
                     <div className="flex gap-2">
-                      <div className="w-2 h-2 bg-neutral-600 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-neutral-600 rounded-full animate-bounce delay-75"></div>
-                      <div className="w-2 h-2 bg-neutral-600 rounded-full animate-bounce delay-150"></div>
+                      <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce delay-75"></div>
+                      <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce delay-150"></div>
                     </div>
+                  </div>
+                </div>
+              )}
+              {!isLoading && (isLoadingReadSuggestions || readSuggestions.length > 0) && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Suggested next</p>
+                  <div className="flex flex-wrap gap-2">
+                    {isLoadingReadSuggestions && readSuggestions.length === 0 && (
+                      <span className="text-xs text-[var(--muted)]">Loading suggestions...</span>
+                    )}
+                    {readSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => handleReadSuggestionClick(suggestion)}
+                        className="px-3 py-1.5 rounded-full border border-[var(--border)] text-xs text-[var(--muted-strong)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1097,44 +1270,46 @@ export default function HomeView() {
               <div className="listen-orbital" style={{ ['--pulse' as string]: pulse.toString() }}>
                 <div className="listen-orb" />
                 <div className="listen-core" />
-                {Array.from({ length: 12 }).map((_, index) => (
-                  <span key={index} className={`listen-particle listen-particle-${index + 1}`} />
+                {listenStatus !== "narrating" && Array.from({ length: 12 }).map((_, index) => (
+                  <span
+                    key={index}
+                    className={`listen-particle listen-particle-${index + 1} ${listenStatus === "thinking" ? "listen-particle-fast" : ""}`}
+                  />
                 ))}
                 <div className="listen-status">
-                  <p className="text-xs uppercase tracking-[0.3em] text-neutral-400">
-                    {listenStatus === "thinking" ? 'Thinking' : listenStatus === "narrating" ? 'Narrating' : listenStatus === "paused" ? 'Paused' : 'Listening'}
+                  <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
+                    {listenStatus === "thinking" ? 'Thinking' : listenStatus === "narrating" ? 'Narrating' : isMicMuted ? 'Muted' : 'Listening'}
                   </p>
-                  <p className="text-lg font-semibold text-white">{searchMode === SearchMode.BOOK ? 'Book' : 'Case Study'} Mode</p>
+                  <p className="text-lg font-semibold text-[var(--foreground)]">{searchMode === SearchMode.BOOK ? 'Book' : 'Case Study'} Mode</p>
                 </div>
               </div>
-              <div className="listen-controls">
-                <button
-                  onClick={pauseListenNarration}
-                  disabled={!isNarrating}
-                  className="listen-control"
-                >
-                  Pause
-                </button>
-                <button
-                  onClick={() => { stopNarration(); setListenStatus("listening"); pendingContinuationRef.current = false; setPendingContinuation(false); activeListenSessionIdRef.current = null; }}
-                  className="listen-control listen-control-stop"
-                >
-                  Stop
-                </button>
-                <button
-                  onClick={resumeListenNarration}
-                  disabled={!pendingContinuation}
-                  className="listen-control"
-                >
-                  Resume
-                </button>
+              <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleStopNarration}
+                    disabled={!isNarrating}
+                    className={`p-3 rounded-xl transition-all ${isNarrating ? 'bg-[var(--foreground)] text-[var(--background)]' : 'bg-[var(--surface)] text-[var(--muted)]'}`}
+                    title="Stop narration"
+                  >
+                    <StopIcon className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className={`p-3 rounded-xl transition-all ${isMicMuted ? 'bg-[var(--surface)] text-[var(--muted)]' : 'bg-[var(--foreground)] text-[var(--background)]'}`}
+                    title={isMicMuted ? "Unmute microphone" : "Mute microphone"}
+                  >
+                    <MicIcon className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {interactionMode === "read" && (
-          <div className="p-4 md:p-8 bg-linear-to-t from-black via-black to-transparent">
+          <div className="p-4 md:p-8 bg-[var(--background)]">
             <div className="max-w-3xl mx-auto">
               <form onSubmit={handleSubmit} className="relative group">
                 <input
@@ -1146,22 +1321,14 @@ export default function HomeView() {
                       ? "Search book (e.g. Atomic Habits)..."
                       : "Search case study..."
                   }
-                  className="w-full bg-neutral-900/50 border border-neutral-800 rounded-2xl py-4 pl-5 pr-24 focus:outline-none focus:border-neutral-600 focus:bg-neutral-900 transition-all text-sm md:text-base placeholder-neutral-600"
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-4 pl-5 pr-24 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-sm md:text-base placeholder-[var(--muted)]"
                 />
 
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={toggleListening}
-                    className={`p-2 rounded-xl transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
-                    title="Voice to Text"
-                  >
-                    <MicIcon className="w-5 h-5" />
-                  </button>
                   <button 
                     type="submit"
                     disabled={!inputValue.trim() || isLoading}
-                    className={`p-2 rounded-xl transition-all ${inputValue.trim() ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-600'}`}
+                    className={`p-2 rounded-xl transition-all ${inputValue.trim() ? 'bg-[var(--foreground)] text-[var(--background)]' : 'bg-[var(--surface)] text-[var(--muted)]'}`}
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
@@ -1169,7 +1336,7 @@ export default function HomeView() {
                   </button>
                 </div>
               </form>
-              <p className="text-[10px] text-center text-neutral-600 mt-3 uppercase tracking-widest">
+              <p className="text-[10px] text-center text-[var(--muted)] mt-3 uppercase tracking-widest">
                 Processing in {settings.language} Language
               </p>
             </div>
@@ -1178,14 +1345,14 @@ export default function HomeView() {
       </main>
 
       {selectedHistory && selectedHistory.interactionMode === "listen" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-neutral-800 flex justify-between items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-[var(--border)] flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold">Listen Session</h2>
-                <p className="text-xs text-neutral-500 uppercase tracking-widest mt-1">{selectedHistory.query}</p>
+                <p className="text-xs text-[var(--muted)] uppercase tracking-widest mt-1">{selectedHistory.query}</p>
               </div>
-              <button onClick={() => setSelectedHistory(null)} className="text-neutral-500 hover:text-white">
+              <button onClick={closeListenModal} className="text-[var(--muted)] hover:text-[var(--foreground)]">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -1195,46 +1362,54 @@ export default function HomeView() {
             <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
               <div className="space-y-3">
                 {selectedHistory.conversation?.map((entry, index) => (
-                  <div key={`${entry.role}-${index}`} className={`p-3 rounded-xl border ${entry.role === 'user' ? 'border-neutral-800 bg-neutral-950' : 'border-neutral-700 bg-neutral-900'}`}>
-                    <p className="text-[11px] uppercase tracking-widest text-neutral-500 mb-2">{entry.role === 'user' ? 'You' : 'Narrator'}</p>
-                    <p className="text-sm text-neutral-200 whitespace-pre-line">{entry.content}</p>
+                  <div key={`${entry.role}-${index}`} className={`p-3 rounded-xl border ${entry.role === 'user' ? 'border-[var(--border)] bg-[var(--surface-strong)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
+                    <p className="text-[11px] uppercase tracking-widest text-[var(--muted)] mb-2">{entry.role === 'user' ? 'You' : 'Narrator'}</p>
+                    <p className="text-sm text-[var(--foreground)] whitespace-pre-line">{entry.content}</p>
                   </div>
                 ))}
               </div>
 
               {selectedHistory.suggestion && (
-                <div className="p-3 rounded-xl border border-neutral-800 bg-neutral-950">
-                  <p className="text-[11px] uppercase tracking-widest text-neutral-500 mb-2">Suggested Next</p>
-                  <p className="text-sm text-neutral-200">{selectedHistory.suggestion}</p>
+                <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]">
+                  <p className="text-[11px] uppercase tracking-widest text-[var(--muted)] mb-2">Suggested Next</p>
+                  <p className="text-sm text-[var(--foreground)]">{selectedHistory.suggestion}</p>
                 </div>
               )}
             </div>
 
             <div className="p-6 pt-0 flex flex-wrap gap-3">
               <button
-                onClick={() => narrateHistoryItem(selectedHistory)}
-                className="px-5 py-3 bg-white text-black font-bold rounded-2xl hover:bg-neutral-200 transition-colors uppercase tracking-widest text-xs"
+                onClick={() => {
+                  if (isNarrating) {
+                    handleStopNarration();
+                  } else {
+                    narrateHistoryItem(selectedHistory);
+                  }
+                }}
+                className={`px-5 py-3 font-bold rounded-2xl transition-colors uppercase tracking-widest text-xs ${isNarrating ? 'bg-[var(--surface-strong)] text-[var(--foreground)]' : 'bg-[var(--foreground)] text-[var(--background)] hover:opacity-90'}`}
               >
-                Narrate Now
+                {isNarrating ? 'Stop Narration' : 'Narrate Now'}
               </button>
-              {selectedHistory.genre && (
-                <span className="px-4 py-3 rounded-2xl border border-neutral-800 text-xs uppercase tracking-widest text-neutral-400">
-                  {selectedHistory.genre}
-                </span>
-              )}
+              <div className="flex flex-wrap gap-2 items-center">
+                {isLoadingListenSuggestions && listenSuggestions.length === 0 && (
+                  <span className="text-xs text-[var(--muted)]">Loading suggestions...</span>
+                )}
+                {listenSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => handleListenSuggestionClick(suggestion)}
+                    className="px-3 py-2 rounded-2xl border border-[var(--border)] text-xs uppercase tracking-widest text-[var(--muted-strong)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Settings Modal - New Component */}
-      {isSettingsOpen && (
-        <SettingsModal
-          settings={settings}
-          onSettingsChange={setSettings}
-          onClose={() => setIsSettingsOpen(false)}
-        />
-      )}
     </div>
   );
 }

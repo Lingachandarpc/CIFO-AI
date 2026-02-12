@@ -278,7 +278,7 @@ export default function Home() {
                   className="w-full text-left p-3 rounded-lg hover:bg-neutral-900 transition-colors text-sm text-neutral-300 truncate"
                 >
                   <div className="flex items-center gap-2">
-                    {item.mode === SearchMode.BOOK ? <BookIcon className="w-3 h-3 text-blue-400" /> : <CaseStudyIcon className="w-3 h-3 text-purple-400" />}
+                    {item.mode === SearchMode.BOOK ? <BookIcon className="w-3 h-3 text-neutral-400" /> : <CaseStudyIcon className="w-3 h-3 text-neutral-400" />}
                     <span className="truncate">{item.query}</span>
                   </div>
                 </button>
@@ -416,7 +416,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={toggleListening}
-                  className={`p-2 rounded-xl transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
+                  className={`p-2 rounded-xl transition-all ${isListening ? 'bg-white text-black animate-pulse' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
                   title="Voice to Text"
                 >
                   <MicIcon className="w-5 h-5" />

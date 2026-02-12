@@ -25,6 +25,7 @@ export async function generateNarrative(
         narrationType: settings.narrationType,
         language: settings.language,
         interactionMode,
+        chatHistory,
         continuation,
       }),
     });
@@ -70,6 +71,32 @@ export async function generateSpeech(text: string, voiceType: VoiceName): Promis
   } catch (error) {
     console.error('Error generating speech (proxy):', error);
     return '';
+  }
+}
+
+export async function generateSuggestions(
+  query: string,
+  language: Language,
+  chatHistory: Array<{ role: string; content: string }>
+): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/suggestions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, language, chatHistory }),
+    });
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      console.error('Suggestions proxy error:', payload);
+      return [];
+    }
+
+    const data = await res.json();
+    return Array.isArray(data.suggestions) ? data.suggestions : [];
+  } catch (error) {
+    console.error('Error generating suggestions (proxy):', error);
+    return [];
   }
 }
 

@@ -120,25 +120,25 @@ export default function SetupProfile() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-2 border-lime-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-neutral-400">Loading...</p>
+          <div className="w-12 h-12 border-2 border-[var(--foreground)] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-[var(--muted)]">Loading...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-neutral-900 to-black flex items-center justify-center p-4 py-12">
+    <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4 py-12">
       <div className="w-full max-w-2xl">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-lime-400 to-lime-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-lime-400/20">
-            <span className="text-2xl font-bold text-black">N</span>
+          <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
+            <span className="text-2xl font-bold text-[var(--background)]">N</span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Complete Your Profile</h1>
-          <p className="text-neutral-400">
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Complete Your Profile</h1>
+          <p className="text-[var(--muted)]">
             Help us personalize your Chronoread experience
           </p>
         </div>
@@ -150,7 +150,7 @@ export default function SetupProfile() {
               key={s}
               onClick={() => setStep(s)}
               className={`flex-1 h-2 rounded-full transition-all ${
-                step >= s ? "bg-gradient-to-r from-lime-400 to-lime-500" : "bg-neutral-800"
+                step >= s ? "bg-[var(--foreground)]" : "bg-[var(--surface-strong)]"
               }`}
             />
           ))}
@@ -158,20 +158,20 @@ export default function SetupProfile() {
 
         {/* Error */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-            <p className="text-red-400 text-sm">{error}</p>
+          <div className="mb-6 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl">
+            <p className="text-[var(--foreground)] text-sm">{error}</p>
           </div>
         )}
 
         {/* Form */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 mb-6">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-8 mb-6">
           {step === 1 ? (
             // Profile Step
             <div className="space-y-6">
-              <h2 className="text-xl font-bold text-white mb-6">Profile Information</h2>
+              <h2 className="text-xl font-bold text-[var(--foreground)] mb-6">Profile Information</h2>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Display Name
                 </label>
                 <input
@@ -180,12 +180,12 @@ export default function SetupProfile() {
                   value={profile.name}
                   onChange={handleProfileChange}
                   placeholder="Your name"
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+                  className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Bio
                 </label>
                 <textarea
@@ -194,13 +194,13 @@ export default function SetupProfile() {
                   onChange={handleProfileChange}
                   placeholder="Tell us about yourself..."
                   rows={4}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors resize-none"
+                  className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors resize-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-neutral-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                     Location (Optional)
                   </label>
                   <input
@@ -209,12 +209,12 @@ export default function SetupProfile() {
                     value={profile.location}
                     onChange={handleProfileChange}
                     placeholder="City, Country"
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+                    className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-neutral-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                     Age (Optional)
                   </label>
                   <input
@@ -225,13 +225,13 @@ export default function SetupProfile() {
                     placeholder="Your age"
                     min="13"
                     max="120"
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+                    className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Interests (Optional)
                 </label>
                 <textarea
@@ -240,24 +240,24 @@ export default function SetupProfile() {
                   onChange={handleProfileChange}
                   placeholder="e.g., Technology, Philosophy, Science Fiction, History..."
                   rows={3}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors resize-none"
+                  className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors resize-none"
                 />
               </div>
             </div>
           ) : (
             // Settings Step
             <div className="space-y-6">
-              <h2 className="text-xl font-bold text-white mb-6">Narration Preferences</h2>
+              <h2 className="text-xl font-bold text-[var(--foreground)] mb-6">Narration Preferences</h2>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Language
                 </label>
                 <select
                   name="language"
                   value={settings.language}
                   onChange={handleSettingsChange}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+                  className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
                 >
                   {Object.values(Language).map((lang) => (
                     <option key={lang} value={lang}>
@@ -268,14 +268,14 @@ export default function SetupProfile() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Neural Voice Persona
                 </label>
                 <select
                   name="voiceType"
                   value={settings.voiceType}
                   onChange={handleSettingsChange}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400/50 transition-colors"
+                  className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
                 >
                   <option value={VoiceName.ZEPHYR}>Zephyr (Smooth & Calming)</option>
                   <option value={VoiceName.KORE}>Kore (Professional & Sharp)</option>
@@ -286,7 +286,7 @@ export default function SetupProfile() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Narrative Style
                 </label>
                 <div className="grid grid-cols-3 gap-3">
@@ -301,8 +301,8 @@ export default function SetupProfile() {
                       }
                       className={`py-3 px-4 rounded-xl font-medium transition-all ${
                         settings.narrationType === style
-                          ? "bg-lime-400/20 border-2 border-lime-400 text-lime-400"
-                          : "bg-neutral-800 border border-neutral-700 text-neutral-400 hover:border-neutral-600"
+                          ? "bg-[var(--foreground)] text-[var(--background)]"
+                          : "bg-[var(--surface-strong)] border border-[var(--border)] text-[var(--muted-strong)] hover:border-[var(--muted-strong)]"
                       }`}
                     >
                       {style}
@@ -312,7 +312,7 @@ export default function SetupProfile() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-3">
+                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-3">
                   Default Narration Duration: {settings.narrationTime} minutes
                 </label>
                 <input
@@ -322,9 +322,9 @@ export default function SetupProfile() {
                   max="15"
                   value={settings.narrationTime}
                   onChange={handleSettingsChange}
-                  className="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-lime-400"
+                  className="w-full h-2 bg-[var(--surface-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--foreground)]"
                 />
-                <div className="flex justify-between text-xs text-neutral-500 mt-2">
+                <div className="flex justify-between text-xs text-[var(--muted)] mt-2">
                   <span>1 min</span>
                   <span>15 mins</span>
                 </div>
@@ -339,7 +339,7 @@ export default function SetupProfile() {
             <button
               onClick={() => setStep(1)}
               disabled={isLoading}
-              className="flex-1 py-3 px-4 bg-neutral-800 border border-neutral-700 text-white font-bold rounded-xl hover:bg-neutral-700 disabled:opacity-50 transition-all"
+              className="flex-1 py-3 px-4 bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] font-bold rounded-xl hover:bg-[var(--surface-strong)] disabled:opacity-50 transition-all"
             >
               Back
             </button>
@@ -348,11 +348,11 @@ export default function SetupProfile() {
           <button
             onClick={() => (step === 1 ? setStep(2) : handleSubmit())}
             disabled={isLoading}
-            className="flex-1 py-3 px-4 bg-gradient-to-r from-lime-400 to-lime-500 text-black font-bold rounded-xl hover:from-lime-300 hover:to-lime-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="flex-1 py-3 px-4 bg-[var(--foreground)] text-[var(--background)] font-bold rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                <span className="w-4 h-4 border-2 border-[var(--background)] border-t-transparent rounded-full animate-spin"></span>
                 {step === 2 ? "Saving..." : "Next"}
               </span>
             ) : step === 2 ? (
@@ -368,7 +368,7 @@ export default function SetupProfile() {
           <div className="text-center mt-4">
             <button
               onClick={() => setStep(2)}
-              className="text-neutral-500 hover:text-neutral-400 transition-colors text-sm"
+              className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors text-sm"
             >
               Skip for now
             </button>
