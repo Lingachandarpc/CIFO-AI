@@ -12,7 +12,7 @@ export async function generateNarrative(
     previousNarration?: string;
     userInterruption?: string;
   }
-): Promise<string> {
+): Promise<{ narration: string; modelUsed?: string }> {
   try {
     const category = mode === SearchMode.BOOK ? 'Book' : mode === SearchMode.CASE_STUDY ? 'Case Study' : 'Ask';
     const res = await fetch(`${API_BASE}/ai`, {
@@ -24,6 +24,7 @@ export async function generateNarrative(
         narrationTime: settings.narrationTime,
         narrationType: settings.narrationType,
         language: settings.language,
+        aiModel: settings.aiModel,
         interactionMode,
         chatHistory,
         continuation,
@@ -37,7 +38,7 @@ export async function generateNarrative(
     }
 
     const data = await res.json();
-    return data.narration || '';
+    return { narration: data.narration || '', modelUsed: data.modelUsed };
   } catch (error) {
     console.error('Error generating narrative (proxy):', error);
     throw error;

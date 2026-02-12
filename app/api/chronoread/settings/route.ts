@@ -35,6 +35,7 @@ export async function GET() {
           voiceGender: 'auto',
           language: 'English',
           ttsProvider: 'elevenlabs',
+          aiModel: 'auto',
           enableBackgroundMusic: true,
           backgroundMusicVolume: 0.15,
         },

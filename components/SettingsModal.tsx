@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, VoiceName, Language, TextToSpeechProvider, VoiceGender } from '../app/types';
+import { Settings, VoiceName, Language, TextToSpeechProvider, VoiceGender, AIModel } from '../app/types';
 import { ELEVENLABS_VOICES, getVoicesForLanguageAndGender } from '../app/services/elevenLabsService';
 
 interface SettingsModalProps {
@@ -22,6 +22,31 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
           X
         </button>
         <h2 className="text-2xl font-bold text-[var(--foreground)] mb-6">Narration Settings</h2>
+
+        {/* AI Model Selection */}
+        <div className="mb-6">
+          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
+            AI Model
+          </label>
+          <select
+            value={settings.aiModel}
+            onChange={(e) =>
+              onSettingsChange({
+                ...settings,
+                aiModel: e.target.value as AIModel,
+              })
+            }
+            className="w-full bg-[var(--surface-strong)] text-[var(--foreground)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--muted-strong)]"
+          >
+            <option value={AIModel.AUTO}>Auto (fastest available)</option>
+            <option value={AIModel.OPENAI}>OpenAI</option>
+            <option value={AIModel.CLAUDE_SONNET}>Claude Sonnet</option>
+            <option value={AIModel.XAI}>xAI</option>
+          </select>
+          <p className="text-xs text-[var(--muted)] mt-1">
+            Auto picks the lowest-latency model based on recent responses.
+          </p>
+        </div>
 
         {/* Text-to-Speech Provider */}
         <div className="mb-6">

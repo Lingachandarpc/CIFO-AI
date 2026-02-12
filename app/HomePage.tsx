@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, VoiceGender, TextToSpeechProvider } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, VoiceGender, TextToSpeechProvider, AIModel } from './types';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, GlobeIcon } from '../components/Icons';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
 
@@ -20,6 +20,7 @@ export default function Home() {
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
     ttsProvider: TextToSpeechProvider.ELEVENLABS,
+    aiModel: AIModel.AUTO,
     enableBackgroundMusic: true,
     backgroundMusicVolume: 0.15,
   });
@@ -201,7 +202,8 @@ export default function Home() {
 
     try {
       const chatHistory = messages.map(m => ({ role: m.role, content: m.content }));
-      const narrativeText = await generateNarrative(userQuery, currentMode, settings, chatHistory);
+      const narrativeResponse = await generateNarrative(userQuery, currentMode, settings, chatHistory);
+      const narrativeText = narrativeResponse.narration;
       
       let audioBase64 = '';
       if (!narrativeText.toLowerCase().includes("search in books instead")) {

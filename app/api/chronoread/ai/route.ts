@@ -2,17 +2,166 @@ export const runtime = "nodejs";
 
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { AIModel } from "../../../types";
 
-export async function POST(req: Request) {
+type ProviderKey = "openai" | "anthropic" | "xai";
+
+const MODEL_CONFIG: Record<AIModel, { provider: ProviderKey; model: string; envKey: string }> = {
+  [AIModel.OPENAI]: { provider: "openai", model: "gpt-3.5-turbo", envKey: "OPENAI_API_KEY" },
+  [AIModel.CLAUDE_SONNET]: { provider: "anthropic", model: "claude-sonnet-4-5-20250929", envKey: "ANTHROPIC_API_KEY" },
+  [AIModel.XAI]: { provider: "xai", model: "grok-3", envKey: "XAI_API_KEY" },
+  [AIModel.AUTO]: { provider: "openai", model: "gpt-3.5-turbo", envKey: "OPENAI_API_KEY" },
+};
+
+const MODEL_STYLE_HINTS: Record<AIModel, string> = {
+  [AIModel.OPENAI]: "Prefer crisp structure, short sentences, and bullet points when helpful.",
+  [AIModel.CLAUDE_SONNET]: "Use clear headings, consistent formatting, and careful factual phrasing.",
+  [AIModel.XAI]: "Be direct, pragmatic, and emphasize actionable insights.",
+  [AIModel.AUTO]: "",
+};
+
+const MODEL_LATENCY: Partial<Record<AIModel, { avgMs: number; count: number }>> = {};
+
+const MODEL_ORDER: AIModel[] = [AIModel.OPENAI, AIModel.CLAUDE_SONNET, AIModel.XAI];
+
+const toModelKey = (value: unknown): AIModel => {
+  if (typeof value !== "string") return AIModel.AUTO;
+  const normalized = value.trim().toLowerCase();
+  switch (normalized) {
+    case AIModel.OPENAI:
+      return AIModel.OPENAI;
+    case AIModel.CLAUDE_SONNET:
+    case "claude":
+    case "claude-sonnet":
+      return AIModel.CLAUDE_SONNET;
+    case AIModel.XAI:
+    case "xai":
+      return AIModel.XAI;
+    default:
+      return AIModel.AUTO;
+  }
+};
+
+const getAvailableModels = () =>
+  MODEL_ORDER.filter((model) => {
+    const config = MODEL_CONFIG[model];
+    return !!process.env[config.envKey];
+  });
+
+const selectAutoModels = (available: AIModel[]) => {
+  const scored = available.map((model) => ({
+    model,
+    avgMs: MODEL_LATENCY[model]?.avgMs,
+  }));
+  const hasKnown = scored.some((item) => typeof item.avgMs === "number");
+  if (!hasKnown) return available;
+  return scored
+    .sort((a, b) => (a.avgMs ?? Number.POSITIVE_INFINITY) - (b.avgMs ?? Number.POSITIVE_INFINITY))
+    .map((item) => item.model);
+};
+
+const recordLatency = (model: AIModel, durationMs: number) => {
+  const current = MODEL_LATENCY[model];
+  if (!current) {
+    MODEL_LATENCY[model] = { avgMs: durationMs, count: 1 };
+    return;
+  }
+  const nextAvg = current.avgMs * 0.7 + durationMs * 0.3;
+  MODEL_LATENCY[model] = { avgMs: nextAvg, count: current.count + 1 };
+};
+
+const buildAnthropicMessages = (messages: OpenAI.ChatCompletionMessageParam[]) =>
+  messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+    }));
+
+const requestOpenAI = async (model: string, messages: OpenAI.ChatCompletionMessageParam[]) => {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) {
-    return NextResponse.json({ error: 'Missing API key' }, { status: 501 });
+  if (!key) throw new Error("Missing OpenAI API key");
+  const openai = new OpenAI({ apiKey: key });
+  const res = await openai.chat.completions.create({
+    model,
+    messages,
+  });
+  return res.choices[0]?.message?.content || "";
+};
+
+const requestAnthropic = async (
+  model: string,
+  messages: OpenAI.ChatCompletionMessageParam[],
+  systemPrompt: string,
+  maxTokens: number
+) => {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("Missing Anthropic API key");
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: buildAnthropicMessages(messages),
+    }),
+  });
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(`Anthropic error: ${res.status} ${JSON.stringify(payload)}`);
   }
 
-  const openai = new OpenAI({ apiKey: key });
+  const data = await res.json();
+  if (Array.isArray(data.content)) {
+    return data.content.map((block: { text?: string }) => block.text || "").join("");
+  }
+  return data.content?.text || "";
+};
 
+const requestXai = async (model: string, messages: OpenAI.ChatCompletionMessageParam[]) => {
+  const key = process.env.XAI_API_KEY;
+  if (!key) throw new Error("Missing xAI API key");
+  const res = await fetch("https://api.x.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+    }),
+  });
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(`xAI error: ${res.status} ${JSON.stringify(payload)}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+};
+
+export async function POST(req: Request) {
   try {
-    const { query, category, narrationTime, narrationType, language, interactionMode, continuation, chatHistory } = await req.json();
+    const { query, category, narrationTime, narrationType, language, interactionMode, continuation, chatHistory, aiModel } = await req.json();
+    const requestedModel = toModelKey(aiModel);
+    const availableModels = getAvailableModels();
+
+    if (availableModels.length === 0) {
+      return NextResponse.json({ error: 'Missing API key' }, { status: 501 });
+    }
+
+    if (requestedModel !== AIModel.AUTO && !availableModels.includes(requestedModel)) {
+      return NextResponse.json({ error: 'Requested model is not configured' }, { status: 501 });
+    }
 
     const narrativeStyleGuide = {
       "Realistic": "Tell the story in a realistic, factual, and grounded manner with real-world examples.",
@@ -30,6 +179,13 @@ export async function POST(req: Request) {
     const listenGuidance = `Anchor the narration in real, verifiable sources. Do not invent events, characters, or citations. If the query is vague, acknowledge the ambiguity briefly and continue with grounded, general guidance relevant to the topic.`;
     const listenStructure = `Start with a first line: Genre: <one or two words>. Then narrate. End with "Suggested next: <similar book or case study>".`;
     const languageEnforcement = `You MUST respond only in ${language}. Do not include translations. Do not use English except for proper nouns. For listen mode, keep the tags "Genre:" and "Suggested next:" in English, but everything else must be in ${language}.`;
+    const isCaseStudy = category === 'Case Study';
+    const caseStudyInstruction = isCaseStudy
+      ? `Case Study format (required):\n- Use headings with short, crisp bullet points or short paragraphs.\n- Use this order: Problem, Solution, Reference, Action Points, Example (translated to ${language}).\n- Keep each section to 2-4 bullets or 1-3 short sentences.\n- If you cannot verify a source, state "Reference: Not specified" (translated to ${language}).`
+      : '';
+    const listenCaseStudyInstruction = isCaseStudy
+      ? `After the Genre line, use the same case study headings and constraints. ${caseStudyInstruction}`
+      : '';
 
     const formattedHistory = Array.isArray(chatHistory)
       ? chatHistory
@@ -50,38 +206,92 @@ export async function POST(req: Request) {
     // that match the user's concern, then provide a short narrated response and a list of matches.
     const userPrompt = category === 'Ask'
       ? `Identify up to 5 relevant books or case studies (title + short reason) that match this concern: "${query}". Then provide a ${timeDescription} response addressing the concern, written in ${language} and the ${narrationType} style. Format: start with a short list of matches, then the narration.\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- ${languageEnforcement}`
-      : `Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- Do not invent sources or facts; stay grounded in known books or case studies related to the query. If the query is unclear, ask a brief clarifying question in one sentence while still giving a relevant, general answer.\n- Keep the narration engaging, clear, and suitable for audio playback\n- ${languageEnforcement}`;
+      : `Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- Do not invent sources or facts; stay grounded in known books or case studies related to the query. If the query is unclear, ask a brief clarifying question in one sentence while still giving a relevant, general answer.\n- Keep the narration engaging, clear, and suitable for audio playback\n${caseStudyInstruction ? `- ${caseStudyInstruction}\n` : ''}- ${languageEnforcement}`;
 
-    const listenPrompt = `${continuationPrompt}Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${listenStructure}\n- ${languageEnforcement}`;
+    const listenPrompt = `${continuationPrompt}Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${listenStructure}\n${listenCaseStudyInstruction ? `- ${listenCaseStudyInstruction}\n` : ''}- ${languageEnforcement}`;
 
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
-      {
-        role: "system",
-        content: `You are a grounded narrator and research assistant. You answer the user's request directly using real sources and avoid fabrication.
+    const baseSystemPrompt = `You are a grounded narrator and research assistant. You answer the user's request directly using real sources and avoid fabrication.
 Style: ${narrationType}
 Language: ${language}
 ${styleInstruction}
-${languageEnforcement}`,
-      },
-    ];
+${languageEnforcement}`;
 
-    if (formattedHistory) {
+    const buildMessages = (systemPrompt: string): OpenAI.ChatCompletionMessageParam[] => {
+      const messages: OpenAI.ChatCompletionMessageParam[] = [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+      ];
+
+      if (formattedHistory) {
+        messages.push({
+          role: "user",
+          content: `Conversation context (most recent):\n${formattedHistory}`,
+        });
+      }
+
       messages.push({
         role: "user",
-        content: `Conversation context (most recent):\n${formattedHistory}`,
+        content: isListenMode ? listenPrompt : userPrompt,
       });
+
+      return messages;
+    };
+
+    const candidateModels = requestedModel === AIModel.AUTO
+      ? selectAutoModels(availableModels)
+      : [requestedModel];
+
+    const maxTokens = Math.min(2048, Math.max(512, Math.round(maxWords * 1.6)));
+    const runModel = async (
+      model: AIModel,
+      messages: OpenAI.ChatCompletionMessageParam[],
+      systemPrompt: string
+    ) => {
+      const config = MODEL_CONFIG[model];
+      if (config.provider === "openai") {
+        return requestOpenAI(config.model, messages);
+      }
+      if (config.provider === "anthropic") {
+        return requestAnthropic(config.model, messages, systemPrompt, maxTokens);
+      }
+      return requestXai(config.model, messages);
+    };
+
+    let initialNarration = '';
+    let lastError: unknown = null;
+    let usedModel: AIModel | null = null;
+
+    for (const model of candidateModels) {
+      const systemPrompt = `${baseSystemPrompt}\n${MODEL_STYLE_HINTS[model]}`.trim();
+      const messages = buildMessages(systemPrompt);
+      const start = Date.now();
+
+      try {
+        const content = await runModel(model, messages, systemPrompt);
+
+        if (!content) {
+          throw new Error("Empty response from model");
+        }
+
+        recordLatency(model, Date.now() - start);
+        initialNarration = content;
+        usedModel = model;
+        break;
+      } catch (error) {
+        lastError = error;
+        console.error(`AI model ${model} failed:`, error);
+      }
     }
 
-    messages.push({
-      role: "user",
-      content: isListenMode ? listenPrompt : userPrompt,
-    });
-
-    const res = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages,
-    });
-    const initialNarration = res.choices[0].message.content || '';
+    if (!initialNarration || !usedModel) {
+      console.error("All AI model attempts failed:", lastError);
+      return NextResponse.json(
+        { error: "AI generation failed" },
+        { status: 500 }
+      );
+    }
 
     const scriptRegexByLanguage: Record<string, RegExp> = {
       Tamil: /[\u0B80-\u0BFF]/,
@@ -131,10 +341,11 @@ ${languageEnforcement}`,
         `If this is listen mode, keep the tags "Genre:" and "Suggested next:" in English exactly as tags, but translate everything else.\n\n` +
         `Narration to rewrite:\n"""${initialNarration}"""`;
 
+      const rewriteSystemPrompt = `You strictly follow the requested language and script. ${languageEnforcement}\n${MODEL_STYLE_HINTS[usedModel]}`.trim();
       const retryMessages: OpenAI.ChatCompletionMessageParam[] = [
         {
           role: "system",
-          content: `You strictly follow the requested language and script. ${languageEnforcement}`,
+          content: rewriteSystemPrompt,
         },
         {
           role: "user",
@@ -142,21 +353,19 @@ ${languageEnforcement}`,
         },
       ];
 
-      const retry = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: retryMessages,
-      });
-      finalNarration = retry.choices[0].message.content || initialNarration;
+      const retryContent = await runModel(usedModel, retryMessages, rewriteSystemPrompt);
+      finalNarration = retryContent || initialNarration;
 
       if (needsScriptRetry(finalNarration)) {
         const translatePrompt = `Translate the following text into ${language}. Output ONLY ${language} in its native script.\n` +
           `If this is listen mode, keep the tags "Genre:" and "Suggested next:" in English exactly as tags, but translate everything else.\n\n` +
           `Text to translate:\n"""${finalNarration}"""`;
 
+        const translateSystemPrompt = `You output only ${language} in native script. ${languageEnforcement}\n${MODEL_STYLE_HINTS[usedModel]}`.trim();
         const finalRetryMessages: OpenAI.ChatCompletionMessageParam[] = [
           {
             role: "system",
-            content: `You output only ${language} in native script. ${languageEnforcement}`,
+            content: translateSystemPrompt,
           },
           {
             role: "user",
@@ -164,11 +373,8 @@ ${languageEnforcement}`,
           },
         ];
 
-        const finalRetry = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: finalRetryMessages,
-        });
-        finalNarration = finalRetry.choices[0].message.content || finalNarration;
+        const finalRetryContent = await runModel(usedModel, finalRetryMessages, translateSystemPrompt);
+        finalNarration = finalRetryContent || finalNarration;
       }
     }
 
@@ -176,6 +382,7 @@ ${languageEnforcement}`,
 
     return NextResponse.json({
       narration: finalNarration,
+      modelUsed: usedModel,
     });
   } catch (err) {
     console.error("AI API error:", err);

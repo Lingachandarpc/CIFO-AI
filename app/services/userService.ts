@@ -1,5 +1,5 @@
 import prisma from '../../lib/prisma'
-import { Settings, SearchMode, VoiceName, Language, VoiceGender, TextToSpeechProvider } from '../types'
+import { Settings, SearchMode, VoiceName, Language, VoiceGender, TextToSpeechProvider, AIModel } from '../types'
 
 /**
  * UserService: Manages user profiles, settings, and chat history.
@@ -21,6 +21,7 @@ export async function getUserSettings(userId: number): Promise<Settings | null> 
       voiceGender: (settings.voiceGender as VoiceGender) || VoiceGender.AUTO,
       language: settings.language as Language,
       ttsProvider: (settings.ttsProvider as TextToSpeechProvider) || TextToSpeechProvider.ELEVENLABS,
+      aiModel: (settings.aiModel as AIModel) || AIModel.AUTO,
       enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
       backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
     }
@@ -43,6 +44,7 @@ export async function updateUserSettings(
       voiceGender: settings.voiceGender ?? 'auto',
       language: settings.language ?? 'English',
       ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+      aiModel: settings.aiModel ?? 'auto',
       enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
       backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
     };
@@ -56,6 +58,7 @@ export async function updateUserSettings(
       ...(settings.voiceGender && { voiceGender: settings.voiceGender }),
       ...(settings.language && { language: settings.language }),
       ...(settings.ttsProvider && { ttsProvider: settings.ttsProvider }),
+      ...(settings.aiModel && { aiModel: settings.aiModel }),
       ...(settings.enableBackgroundMusic !== undefined && {
         enableBackgroundMusic: settings.enableBackgroundMusic,
       }),
@@ -89,6 +92,7 @@ export async function updateUserSettings(
             voiceType: settings.voiceType ?? 'zephyr',
             language: settings.language ?? 'English',
             ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+            aiModel: settings.aiModel ?? 'auto',
             enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
             backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
           },
@@ -100,6 +104,7 @@ export async function updateUserSettings(
             ...(settings.voiceType && { voiceType: settings.voiceType }),
             ...(settings.language && { language: settings.language }),
             ...(settings.ttsProvider && { ttsProvider: settings.ttsProvider }),
+            ...(settings.aiModel && { aiModel: settings.aiModel }),
             ...(settings.enableBackgroundMusic !== undefined && {
               enableBackgroundMusic: settings.enableBackgroundMusic,
             }),

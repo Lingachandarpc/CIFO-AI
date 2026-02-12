@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre, VoiceGender } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel } from './types';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions } from './services/openaiService';
@@ -43,9 +43,11 @@ export default function HomeView() {
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
     ttsProvider: TextToSpeechProvider.ELEVENLABS,
+    aiModel: AIModel.AUTO,
     enableBackgroundMusic: true,
     backgroundMusicVolume: 0.15,
   });
+  const [lastAutoModel, setLastAutoModel] = useState<AIModel | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -234,6 +236,7 @@ export default function HomeView() {
               voiceGender: settingsData.settings.voiceGender || VoiceGender.AUTO,
               language: settingsData.settings.language || Language.ENGLISH,
               ttsProvider: settingsData.settings.ttsProvider || TextToSpeechProvider.ELEVENLABS,
+              aiModel: settingsData.settings.aiModel || AIModel.AUTO,
               enableBackgroundMusic: settingsData.settings.enableBackgroundMusic !== undefined ? settingsData.settings.enableBackgroundMusic : true,
               backgroundMusicVolume: settingsData.settings.backgroundMusicVolume || 0.15,
             }));
@@ -676,7 +679,12 @@ export default function HomeView() {
 
     try {
       const chatHistory = [...messages.slice(-5), newUserMsg].map(m => ({ role: m.role, content: m.content }));
-      const narrativeText = await generateNarrative(userQuery, currentMode, settings, chatHistory);
+      const narrativeResponse = await generateNarrative(userQuery, currentMode, settings, chatHistory);
+      const narrativeText = narrativeResponse.narration;
+      const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
+      if (settings.aiModel === AIModel.AUTO && resolvedModel) {
+        setLastAutoModel(resolvedModel);
+      }
       
       const audioBase64 = '';
 
@@ -740,6 +748,28 @@ export default function HomeView() {
     await submitQuery(inputValue);
   };
 
+  const getModelLabel = (model: AIModel) => {
+    switch (model) {
+      case AIModel.CLAUDE_SONNET:
+        return 'Claude Sonnet';
+      case AIModel.XAI:
+        return 'xAI';
+      case AIModel.OPENAI:
+        return 'OpenAI';
+      default:
+        return 'Auto';
+    }
+  };
+
+  const normalizeModel = (value?: string): AIModel | null => {
+    if (!value) return null;
+    const normalized = value.toLowerCase();
+    if (normalized === AIModel.OPENAI) return AIModel.OPENAI;
+    if (normalized === AIModel.CLAUDE_SONNET) return AIModel.CLAUDE_SONNET;
+    if (normalized === AIModel.XAI) return AIModel.XAI;
+    return null;
+  };
+
   async function handleListenTranscript(transcript: string) {
     if (!transcript.trim() || isLoading) return;
 
@@ -784,7 +814,7 @@ export default function HomeView() {
           }
         : undefined;
 
-      const narrativeText = await generateNarrative(
+      const narrativeResponse = await generateNarrative(
         transcript,
         currentMode,
         settings,
@@ -792,6 +822,12 @@ export default function HomeView() {
         "listen",
         continuation
       );
+
+      const narrativeText = narrativeResponse.narration;
+      const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
+      if (settings.aiModel === AIModel.AUTO && resolvedModel) {
+        setLastAutoModel(resolvedModel);
+      }
 
       const { cleanedText, genre, suggestion } = extractListenMetadata(narrativeText);
       lastNarrationRef.current = cleanedText;
@@ -1287,6 +1323,11 @@ export default function HomeView() {
                     {listenStatus === "thinking" ? 'Thinking' : listenStatus === "narrating" ? 'Narrating' : isMicMuted ? 'Muted' : 'Listening'}
                   </p>
                   <p className="text-lg font-semibold text-[var(--foreground)]">{searchMode === SearchMode.BOOK ? 'Book' : 'Case Study'} Mode</p>
+                  {settings.aiModel === AIModel.AUTO && lastAutoModel && (
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">
+                      Auto: {getModelLabel(lastAutoModel)}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="absolute bottom-6 left-0 right-0 flex justify-center">
@@ -1345,6 +1386,11 @@ export default function HomeView() {
               <p className="text-[10px] text-center text-[var(--muted)] mt-3 uppercase tracking-widest">
                 Processing in {settings.language} Language
               </p>
+              {settings.aiModel === AIModel.AUTO && lastAutoModel && (
+                <p className="text-[10px] text-center text-[var(--muted)] mt-1 uppercase tracking-widest">
+                  AI Model: {getModelLabel(lastAutoModel)}
+                </p>
+              )}
             </div>
           </div>
         )}

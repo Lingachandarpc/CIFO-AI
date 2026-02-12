@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Settings, Language, VoiceName, TextToSpeechProvider, VoiceGender } from "../types";
+import { Settings, Language, VoiceName, TextToSpeechProvider, VoiceGender, AIModel } from "../types";
 import { ELEVENLABS_VOICES, getVoicesForLanguageAndGender } from "../services/elevenLabsService";
 
 const defaultSettings: Settings = {
@@ -12,6 +12,7 @@ const defaultSettings: Settings = {
   voiceGender: VoiceGender.AUTO,
   language: Language.ENGLISH,
   ttsProvider: TextToSpeechProvider.ELEVENLABS,
+  aiModel: AIModel.AUTO,
   enableBackgroundMusic: true,
   backgroundMusicVolume: 0.15,
 };
@@ -194,6 +195,27 @@ export default function SettingsPage() {
           </div>
         ) : activeTab === "narration" ? (
           <div className="space-y-8 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <div>
+              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">AI Model</label>
+              <select
+                value={settings.aiModel}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    aiModel: e.target.value as AIModel,
+                  }))
+                }
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+              >
+                <option value={AIModel.AUTO}>Auto (fastest available)</option>
+                <option value={AIModel.OPENAI}>OpenAI</option>
+                <option value={AIModel.CLAUDE_SONNET}>Claude Sonnet</option>
+                <option value={AIModel.XAI}>xAI</option>
+              </select>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                Auto uses the lowest-latency model based on recent responses.
+              </p>
+            </div>
             <div>
               <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Text-to-Speech Provider</label>
               <select

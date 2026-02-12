@@ -42,6 +42,13 @@ export enum TextToSpeechProvider {
   ELEVENLABS = "elevenlabs",
 }
 
+export enum AIModel {
+  AUTO = "auto",
+  OPENAI = "openai",
+  CLAUDE_SONNET = "claude-sonnet",
+  XAI = "xai",
+}
+
 export enum Genre {
   PERSONAL_FINANCE = "Personal Finance",
   TECHNOLOGY = "Technology",
@@ -63,6 +70,7 @@ export interface Settings {
   voiceGender: VoiceGender;
   language: Language;
   ttsProvider: TextToSpeechProvider;
+  aiModel: AIModel;
   enableBackgroundMusic: boolean;
   backgroundMusicVolume: number; // 0.0 - 1.0
 }

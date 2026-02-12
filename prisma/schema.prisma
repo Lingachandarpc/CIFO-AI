@@ -88,6 +88,7 @@ model UserSettings {
   voiceGender   String   @default("auto")
   language      String   @default("English")
   ttsProvider   String   @default("elevenlabs") // openai or elevenlabs
+  aiModel       String   @default("auto") // auto, openai, claude-sonnet, xai
   enableBackgroundMusic Boolean @default(true)
   backgroundMusicVolume Float   @default(0.15)  // 0.0 - 1.0
   createdAt     DateTime @default(now())
