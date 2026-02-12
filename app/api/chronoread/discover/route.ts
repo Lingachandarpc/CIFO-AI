@@ -26,17 +26,15 @@ export async function GET() {
         "Book": ["Atomic Habits", "Deep Work", "Sapiens", "The Alchemist"],
       };
     } else {
-      const res = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Generate familiar, popular topics. Return STRICT JSON only.",
-          },
-          {
-            role: "user",
-            content: `
+      const messages: OpenAI.ChatCompletionMessageParam[] = [
+        {
+          role: "system",
+          content:
+            "Generate familiar, popular topics. Return STRICT JSON only.",
+        },
+        {
+          role: "user",
+          content: `
 Return 4 topics for each category below.
 
 Categories:
@@ -49,8 +47,12 @@ JSON format:
   "Book": ["Topic 1", "Topic 2"]
 }
 `,
-          },
-        ],
+        },
+      ];
+
+      const res = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages,
       });
 
       const raw = res.choices[0]?.message?.content;

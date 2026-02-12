@@ -23,18 +23,20 @@ export async function POST(req: Request) {
 
     const prompt = `Based on the user's query and recent conversation, suggest 3 concise, relevant follow-up prompts in ${language}.\n\nQuery: "${query}"\n\nConversation:\n${formattedHistory}\n\nRules:\n- Output exactly 3 lines, each a short suggestion (4-10 words).\n- No numbering or bullets.\n- Keep them specific to the user's interests and prior prompts.\n- ${language} only.`;
 
+    const messages: OpenAI.ChatCompletionMessageParam[] = [
+      {
+        role: "system",
+        content: `You generate short, relevant follow-up suggestions in ${language}.`,
+      },
+      {
+        role: "user",
+        content: prompt,
+      },
+    ];
+
     const res = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `You generate short, relevant follow-up suggestions in ${language}.`,
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+      messages,
     });
 
     const raw = res.choices[0].message.content || '';

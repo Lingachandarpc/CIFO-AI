@@ -54,30 +54,32 @@ export async function POST(req: Request) {
 
     const listenPrompt = `${continuationPrompt}Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${listenStructure}\n- ${languageEnforcement}`;
 
-    const res = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `You are a grounded narrator and research assistant. You answer the user's request directly using real sources and avoid fabrication.
+    const messages: OpenAI.ChatCompletionMessageParam[] = [
+      {
+        role: "system",
+        content: `You are a grounded narrator and research assistant. You answer the user's request directly using real sources and avoid fabrication.
 Style: ${narrationType}
 Language: ${language}
 ${styleInstruction}
 ${languageEnforcement}`,
-        },
-        ...(formattedHistory
-          ? [
-              {
-                role: "user",
-                content: `Conversation context (most recent):\n${formattedHistory}`,
-              },
-            ]
-          : []),
-        {
-          role: "user",
-          content: isListenMode ? listenPrompt : userPrompt,
-        },
-      ],
+      },
+    ];
+
+    if (formattedHistory) {
+      messages.push({
+        role: "user",
+        content: `Conversation context (most recent):\n${formattedHistory}`,
+      });
+    }
+
+    messages.push({
+      role: "user",
+      content: isListenMode ? listenPrompt : userPrompt,
+    });
+
+    const res = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages,
     });
     const initialNarration = res.choices[0].message.content || '';
 
@@ -129,18 +131,20 @@ ${languageEnforcement}`,
         `If this is listen mode, keep the tags "Genre:" and "Suggested next:" in English exactly as tags, but translate everything else.\n\n` +
         `Narration to rewrite:\n"""${initialNarration}"""`;
 
+      const retryMessages: OpenAI.ChatCompletionMessageParam[] = [
+        {
+          role: "system",
+          content: `You strictly follow the requested language and script. ${languageEnforcement}`,
+        },
+        {
+          role: "user",
+          content: rewritePrompt,
+        },
+      ];
+
       const retry = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: `You strictly follow the requested language and script. ${languageEnforcement}`,
-          },
-          {
-            role: "user",
-            content: rewritePrompt,
-          },
-        ],
+        messages: retryMessages,
       });
       finalNarration = retry.choices[0].message.content || initialNarration;
 
@@ -149,18 +153,20 @@ ${languageEnforcement}`,
           `If this is listen mode, keep the tags "Genre:" and "Suggested next:" in English exactly as tags, but translate everything else.\n\n` +
           `Text to translate:\n"""${finalNarration}"""`;
 
+        const finalRetryMessages: OpenAI.ChatCompletionMessageParam[] = [
+          {
+            role: "system",
+            content: `You output only ${language} in native script. ${languageEnforcement}`,
+          },
+          {
+            role: "user",
+            content: translatePrompt,
+          },
+        ];
+
         const finalRetry = await openai.chat.completions.create({
           model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content: `You output only ${language} in native script. ${languageEnforcement}`,
-            },
-            {
-              role: "user",
-              content: translatePrompt,
-            },
-          ],
+          messages: finalRetryMessages,
         });
         finalNarration = finalRetry.choices[0].message.content || finalNarration;
       }
