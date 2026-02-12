@@ -116,12 +116,10 @@ export default function SignUp() {
         {/* Header */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
-            <span className="text-2xl font-bold text-[var(--background)]">N</span>
+            <span className="text-2xl font-bold text-[var(--background)]">S</span>
           </div>
-          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Join Chronoread</h1>
-          <p className="text-[var(--muted)]">
-            Create your neural narrative account
-          </p>
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Join Self \ Fles</h1>
+          <p className="text-[var(--muted)]">Self companion AI app.</p>
         </div>
 
         {/* Error Message */}

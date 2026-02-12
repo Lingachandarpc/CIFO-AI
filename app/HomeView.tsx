@@ -948,12 +948,10 @@ export default function HomeView() {
       <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
         <div className="w-full max-w-md text-center">
           <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
-            <span className="text-2xl font-bold text-[var(--background)]">N</span>
+            <span className="text-2xl font-bold text-[var(--background)]">S</span>
           </div>
-          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-4">Welcome to Chronoread</h1>
-          <p className="text-[var(--muted)] mb-8 text-lg">
-            Explore books and case studies with AI-powered neural narratives
-          </p>
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-4">Welcome to Self \ Fles</h1>
+          <p className="text-[var(--muted)] mb-8 text-lg">Self companion AI app.</p>
           <div className="space-y-3">
             <button
               onClick={() => router.push('/auth/signin')}
@@ -979,9 +977,9 @@ export default function HomeView() {
       <aside className="w-64 border-r border-[var(--border)] hidden md:flex md:flex-col">
         <div className="p-6 border-b border-[var(--border)] flex items-center gap-3">
           <div className="w-8 h-8 bg-[var(--foreground)] rounded-md flex items-center justify-center">
-            <span className="text-[var(--background)] font-bold text-xl">X</span>
+            <span className="text-[var(--background)] font-bold text-xl">S</span>
           </div>
-          <span className="font-bold tracking-tight text-lg">NarrativeX</span>
+          <span className="font-bold tracking-tight text-lg">Self \ Fles</span>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
@@ -1055,7 +1053,7 @@ export default function HomeView() {
       <main className="flex-1 flex flex-col relative bg-[var(--background)]">
         {/* Header (Mobile) */}
         <header className="md:hidden p-4 border-b border-[var(--border)] flex justify-between items-center">
-          <span className="font-bold">NarrativeX</span>
+          <span className="font-bold">Self \ Fles</span>
           <button
             type="button"
             onClick={() => setIsMobileMenuOpen(true)}
@@ -1202,7 +1200,7 @@ export default function HomeView() {
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
                   <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center border border-[var(--border)]">
-                    <span className="text-3xl font-bold">N</span>
+                    <span className="text-3xl font-bold">S</span>
                   </div>
                   <div>
                     <h1 className="text-3xl font-bold mb-2">Narrate in {settings.language}</h1>
@@ -1231,7 +1229,7 @@ export default function HomeView() {
                       )}
                     </div>
                     <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-2 uppercase tracking-tighter">
-                      {msg.role === 'assistant' ? 'NarrativeX' : 'You'} 
+                      {msg.role === 'assistant' ? 'Self \\ Fles' : 'You'} 
                       <span>•</span>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
