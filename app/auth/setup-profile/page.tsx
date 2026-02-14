@@ -285,7 +285,7 @@ export default function SetupProfile() {
 
               <div>
                 <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
-                  Narrative Style
+                  Response Style
                 </label>
                 <div className="grid grid-cols-3 gap-3">
                   {["Realistic", "Dramatic", "Educational"].map((style) => (
@@ -311,7 +311,7 @@ export default function SetupProfile() {
 
               <div>
                 <label className="block text-sm font-medium text-[var(--muted-strong)] mb-3">
-                  Default Narration Duration: {settings.narrationTime} minutes
+                  Default Read/Listen Time: {settings.narrationTime} minutes
                 </label>
                 <input
                   type="range"

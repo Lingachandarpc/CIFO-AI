@@ -483,7 +483,7 @@ export default function Home() {
               </div>
 
               <div className="space-y-3">
-                <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Narration Duration</label>
+                <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Read/Listen Time</label>
                 <input 
                   type="range" 
                   min="1" 
@@ -500,7 +500,7 @@ export default function Home() {
               </div>
 
               <div className="space-y-3">
-                <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Narrative Style</label>
+                <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Response Style</label>
                 <div className="grid grid-cols-3 gap-2">
                   {['Realistic', 'Dramatic', 'Educational'].map((type) => (
                     <button

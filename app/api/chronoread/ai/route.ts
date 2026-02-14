@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { AIModel } from "../../../types";
+import { buildPromptTemplate, PromptUserContext } from "./promptTemplate";
 
 type ProviderKey = "openai" | "anthropic" | "xai";
 
@@ -22,7 +23,7 @@ const MODEL_STYLE_HINTS: Record<AIModel, string> = {
 
 const MODEL_LATENCY: Partial<Record<AIModel, { avgMs: number; count: number }>> = {};
 
-const MODEL_ORDER: AIModel[] = [AIModel.OPENAI, AIModel.CLAUDE_SONNET, AIModel.XAI];
+const GENERATION_MODEL_ORDER: AIModel[] = [AIModel.OPENAI, AIModel.CLAUDE_SONNET, AIModel.XAI];
 
 const toModelKey = (value: unknown): AIModel => {
   if (typeof value !== "string") return AIModel.AUTO;
@@ -43,10 +44,35 @@ const toModelKey = (value: unknown): AIModel => {
 };
 
 const getAvailableModels = () =>
-  MODEL_ORDER.filter((model) => {
+  GENERATION_MODEL_ORDER.filter((model) => {
     const config = MODEL_CONFIG[model];
     return !!process.env[config.envKey];
   });
+
+const detectCategory = (query: string, userCategory: string): string => {
+  // If user explicitly set case study, keep it
+  if (userCategory === 'Case Study') return 'Case Study';
+  
+  // Auto-detect based on query content
+  const lowerQuery = query.toLowerCase();
+  
+  // Book indicators
+  const bookKeywords = ['book', 'novel', 'author', 'read', 'chapter', 'isbn', 'publisher', 'bestseller', 'fiction', 'non-fiction', 'biography', 'memoir'];
+  const hasBookIndicators = bookKeywords.some(keyword => lowerQuery.includes(keyword));
+  
+  // Case study indicators
+  const caseStudyKeywords = ['case study', 'study', 'research', 'analysis', 'example', 'scenario', 'business case', 'company', 'startup', 'industry', 'market', 'strategy', 'problem', 'solution'];
+  const hasCaseStudyIndicators = caseStudyKeywords.some(keyword => lowerQuery.includes(keyword));
+  
+  // If has book indicators and no case study indicators, use Book
+  if (hasBookIndicators && !hasCaseStudyIndicators) return 'Book';
+  
+  // If has case study indicators, use Case Study
+  if (hasCaseStudyIndicators) return 'Case Study';
+  
+  // Default to Book for general queries
+  return 'Book';
+};
 
 const selectAutoModels = (available: AIModel[]) => {
   const scored = available.map((model) => ({
@@ -151,7 +177,21 @@ const requestXai = async (model: string, messages: OpenAI.ChatCompletionMessageP
 
 export async function POST(req: Request) {
   try {
-    const { query, category, narrationTime, narrationType, language, interactionMode, continuation, chatHistory, aiModel } = await req.json();
+    const {
+      query,
+      category: userCategory,
+      narrationTime,
+      narrationType,
+      language,
+      interactionMode,
+      continuation,
+      chatHistory,
+      userContext,
+      aiModel,
+    } = await req.json();
+    
+    // Auto-detect category based on query content
+    const category = detectCategory(query, userCategory);
     const requestedModel = toModelKey(aiModel);
     const availableModels = getAvailableModels();
 
@@ -176,15 +216,25 @@ export async function POST(req: Request) {
     const wordsPerMinute = isListenMode ? 150 : 130;
     const targetWords = Math.max(120, narrationTime * wordsPerMinute);
     const maxWords = Math.max(150, Math.round(targetWords * 1.1));
-    const listenGuidance = `Anchor the narration in real, verifiable sources. Do not invent events, characters, or citations. If the query is vague, acknowledge the ambiguity briefly and continue with grounded, general guidance relevant to the topic.`;
-    const listenStructure = `Start with a first line: Genre: <one or two words>. Then narrate. End with "Suggested next: <similar book or case study>".`;
-    const languageEnforcement = `You MUST respond only in ${language}. Do not include translations. Do not use English except for proper nouns. For listen mode, keep the tags "Genre:" and "Suggested next:" in English, but everything else must be in ${language}.`;
+    const promptTemplate = buildPromptTemplate({
+      query,
+      category,
+      language,
+      interactionMode: isListenMode ? "listen" : "read",
+      userContext: (userContext as PromptUserContext | undefined),
+      chatHistory: Array.isArray(chatHistory) ? chatHistory : [],
+    });
+    const listenGuidance = promptTemplate.listenGuidance;
+    const sourceCoverageInstruction = promptTemplate.sourceCoverageInstruction;
+    const outputContract = promptTemplate.outputContract;
+    const languageEnforcement = promptTemplate.languageEnforcement;
+    const personalizationInstruction = promptTemplate.personalizationInstruction;
     const isCaseStudy = category === 'Case Study';
     const caseStudyInstruction = isCaseStudy
-      ? `Case Study format (required):\n- Use headings with short, crisp bullet points or short paragraphs.\n- Use this order: Problem, Solution, Reference, Action Points, Example (translated to ${language}).\n- Keep each section to 2-4 bullets or 1-3 short sentences.\n- If you cannot verify a source, state "Reference: Not specified" (translated to ${language}).`
+      ? `Case Study format (required):\n- Use dynamic, context-specific headings based on the query.\n- Do NOT force static templates or fixed headings like Problem/Solution/Reference/Action Points/Example.\n- Keep each section concise: 2-4 bullets or 1-3 short sentences.`
       : '';
     const listenCaseStudyInstruction = isCaseStudy
-      ? `After the Genre line, use the same case study headings and constraints. ${caseStudyInstruction}`
+      ? `Apply the same case study constraints while preserving the output contract.`
       : '';
 
     const formattedHistory = Array.isArray(chatHistory)
@@ -206,14 +256,17 @@ export async function POST(req: Request) {
     // that match the user's concern, then provide a short narrated response and a list of matches.
     const userPrompt = category === 'Ask'
       ? `Identify up to 5 relevant books or case studies (title + short reason) that match this concern: "${query}". Then provide a ${timeDescription} response addressing the concern, written in ${language} and the ${narrationType} style. Format: start with a short list of matches, then the narration.\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- ${languageEnforcement}`
-      : `Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- Do not invent sources or facts; stay grounded in known books or case studies related to the query. If the query is unclear, ask a brief clarifying question in one sentence while still giving a relevant, general answer.\n- Keep the narration engaging, clear, and suitable for audio playback\n${caseStudyInstruction ? `- ${caseStudyInstruction}\n` : ''}- ${languageEnforcement}`;
+      : `Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${sourceCoverageInstruction}\n- ${personalizationInstruction}\n- Do not invent sources or facts; stay grounded in known references related to the query. If the query is unclear, ask a brief clarifying question in one sentence while still giving a relevant, general answer.\n- Keep the narration engaging, clear, and suitable for reading and audio playback\n${caseStudyInstruction ? `- ${caseStudyInstruction}\n` : ''}- ${outputContract}\n- ${languageEnforcement}`;
 
-    const listenPrompt = `${continuationPrompt}Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${listenStructure}\n${listenCaseStudyInstruction ? `- ${listenCaseStudyInstruction}\n` : ''}- ${languageEnforcement}`;
+    const listenPrompt = `${continuationPrompt}Provide a ${timeDescription} narration that directly addresses the user's query:\n"${query}"\nCategory: ${category}\n\nInstructions:\n- Aim for about ${targetWords} words, maximum ${maxWords}.\n- Duration: approximately ${narrationTime} minutes\n- Narrative Style: ${narrationType}\n- Language: ${language}\n- ${styleInstruction}\n- ${listenGuidance}\n- ${sourceCoverageInstruction}\n- ${personalizationInstruction}\n${listenCaseStudyInstruction ? `- ${listenCaseStudyInstruction}\n` : ''}- ${outputContract}\n- Add a FINAL machine line for voice synthesis only: Voice Profile: genre=<short label>; tone=<calm|neutral|intense>; pace=<slow|medium|fast>; pitch=<low|medium|high>; slang=<none|light|moderate>\n- This Voice Profile line must be the last line.\n- ${languageEnforcement}`;
 
     const baseSystemPrompt = `You are a grounded narrator and research assistant. You answer the user's request directly using real sources and avoid fabrication.
 Style: ${narrationType}
 Language: ${language}
 ${styleInstruction}
+${sourceCoverageInstruction}
+${personalizationInstruction}
+${outputContract}
 ${languageEnforcement}`;
 
     const buildMessages = (systemPrompt: string): OpenAI.ChatCompletionMessageParam[] => {
@@ -324,21 +377,21 @@ ${languageEnforcement}`;
       }
 
       const lines = normalized.split(/\r?\n/).filter((line) => line.trim().length > 0);
-      const genreLine = lines.find((line) => line.trim().toLowerCase().startsWith('genre:')) || '';
-      const suggestionLine = [...lines].reverse().find((line) => line.trim().toLowerCase().startsWith('suggested next:')) || '';
-      const bodyLines = lines.filter((line) => line !== genreLine && line !== suggestionLine);
-      const preservedWords = `${genreLine} ${suggestionLine}`.trim().split(/\s+/).filter(Boolean).length;
+      const voiceProfileLine = [...lines].reverse().find((line) => line.trim().toLowerCase().startsWith('voice profile:')) || '';
+      const suggestionLine = [...lines].reverse().find((line) => line.trim().toLowerCase().startsWith('suggested next topics:')) || '';
+      const bodyLines = lines.filter((line) => line !== voiceProfileLine && line !== suggestionLine);
+      const preservedWords = `${voiceProfileLine} ${suggestionLine}`.trim().split(/\s+/).filter(Boolean).length;
       const remaining = Math.max(10, limit - preservedWords);
       const bodyWords = bodyLines.join(' ').trim().split(/\s+/).filter(Boolean);
       const trimmedBody = bodyWords.slice(0, remaining).join(' ');
-      const rebuilt = [genreLine, trimmedBody, suggestionLine].filter(Boolean).join('\n');
+      const rebuilt = [trimmedBody, suggestionLine, voiceProfileLine].filter(Boolean).join('\n');
       return rebuilt || normalized;
     };
 
     let finalNarration = initialNarration;
     if (needsScriptRetry(initialNarration)) {
       const rewritePrompt = `Rewrite the following narration so it is fully in ${language} using its native script only.\n` +
-        `If this is listen mode, keep the tags "Genre:" and "Suggested next:" in English exactly as tags, but translate everything else.\n\n` +
+        `If this is listen mode, keep the tags "Suggested Next Topics:" and "Voice Profile:" in English exactly as tags, but translate everything else.\n\n` +
         `Narration to rewrite:\n"""${initialNarration}"""`;
 
       const rewriteSystemPrompt = `You strictly follow the requested language and script. ${languageEnforcement}\n${MODEL_STYLE_HINTS[usedModel]}`.trim();
@@ -358,7 +411,7 @@ ${languageEnforcement}`;
 
       if (needsScriptRetry(finalNarration)) {
         const translatePrompt = `Translate the following text into ${language}. Output ONLY ${language} in its native script.\n` +
-          `If this is listen mode, keep the tags "Genre:" and "Suggested next:" in English exactly as tags, but translate everything else.\n\n` +
+          `If this is listen mode, keep the tags "Suggested Next Topics:" and "Voice Profile:" in English exactly as tags, but translate everything else.\n\n` +
           `Text to translate:\n"""${finalNarration}"""`;
 
         const translateSystemPrompt = `You output only ${language} in native script. ${languageEnforcement}\n${MODEL_STYLE_HINTS[usedModel]}`.trim();

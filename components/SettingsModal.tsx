@@ -21,7 +21,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
         >
           X
         </button>
-        <h2 className="text-2xl font-bold text-[var(--foreground)] mb-6">Narration Settings</h2>
+        <h2 className="text-2xl font-bold text-[var(--foreground)] mb-6">Response Settings</h2>
 
         {/* AI Model Selection */}
         <div className="mb-6">
@@ -65,9 +65,10 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
           >
             <option value={TextToSpeechProvider.ELEVENLABS}>ElevenLabs (Advanced)</option>
             <option value={TextToSpeechProvider.OPENAI}>OpenAI</option>
+            <option value={TextToSpeechProvider.OPEN_SOURCE}>Open-source (Browser TTS)</option>
           </select>
           <p className="text-xs text-[var(--muted)] mt-1">
-            ElevenLabs offers better voice quality and more language support
+            Falls back to browser TTS if cloud providers are unavailable.
           </p>
         </div>
 
@@ -151,10 +152,10 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
           )}
         </div>
 
-        {/* Narration Type */}
+        {/* Response Style */}
         <div className="mb-6">
           <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-            Narration Style
+            Response Style
           </label>
           <div className="grid grid-cols-3 gap-3">
             {['Realistic', 'Dramatic', 'Educational'].map((type) => (
@@ -178,10 +179,10 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
           </div>
         </div>
 
-        {/* Narration Duration */}
+        {/* Read/Listen Duration */}
         <div className="mb-6">
           <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-            Narration Duration: {settings.narrationTime} minutes
+            Read/Listen Time: {settings.narrationTime} minutes
           </label>
           <input
             type="range"

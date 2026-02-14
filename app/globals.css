@@ -84,6 +84,36 @@ body {
   }
 }
 
+@keyframes brand-flip {
+  0%, 18% { transform: rotateX(0deg); opacity: 1; }
+  35% { transform: rotateX(90deg); opacity: 0.5; }
+  52% { transform: rotateX(180deg); opacity: 1; }
+  70% { transform: rotateX(270deg); opacity: 0.6; }
+  100% { transform: rotateX(360deg); opacity: 1; }
+}
+
+.brand-flip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  perspective: 800px;
+}
+
+.brand-flip-word {
+  display: inline-block;
+  transform-origin: center;
+  animation: brand-flip 6s ease-in-out infinite;
+}
+
+.brand-flip-delay {
+  animation-delay: 0.8s;
+}
+
+.brand-flip-slash {
+  font-size: 0.7em;
+  opacity: 0.6;
+}
+
 .grok-glow {
   animation: glow 3s ease-in-out infinite;
 }
@@ -106,9 +136,17 @@ body {
     radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.16), transparent 35%),
     radial-gradient(circle at 80% 30%, rgba(251, 191, 36, 0.18), transparent 38%),
     radial-gradient(circle at 50% 80%, rgba(168, 85, 247, 0.16), transparent 40%),
-    radial-gradient(circle at 40% 50%, rgba(34, 197, 94, 0.12), transparent 45%);
-  filter: blur(6px);
+    radial-gradient(circle at 40% 50%, rgba(34, 197, 94, 0.12), transparent 45%),
+    radial-gradient(circle at 70% 70%, rgba(244, 114, 182, 0.14), transparent 42%),
+    radial-gradient(circle at 10% 70%, rgba(96, 165, 250, 0.15), transparent 40%);
+  filter: blur(8px);
   z-index: 0;
+  animation: listen-bg-pulse 8s ease-in-out infinite;
+}
+
+@keyframes listen-bg-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 
 .listen-orbital {
@@ -127,10 +165,20 @@ body {
   width: 200px;
   height: 200px;
   border-radius: 9999px;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.55), rgba(59, 130, 246, 0.22), rgba(15, 23, 42, 0.9));
+  background: 
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.55), rgba(59, 130, 246, 0.22), rgba(15, 23, 42, 0.9)),
+    conic-gradient(from 0deg, rgba(56, 189, 248, 0.3), rgba(168, 85, 247, 0.3), rgba(251, 191, 36, 0.3), rgba(56, 189, 248, 0.3));
   transform: scale(calc(0.85 + (var(--pulse) * 0.4)));
   transition: transform 120ms ease-out;
-  box-shadow: 0 0 60px var(--listen-orb-glow);
+  box-shadow: 
+    0 0 60px var(--listen-orb-glow),
+    inset 0 0 40px rgba(255, 255, 255, 0.1);
+  animation: listen-orb-rotate 20s linear infinite;
+}
+
+@keyframes listen-orb-rotate {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 100% 100%; }
 }
 
 .listen-core {
@@ -138,10 +186,26 @@ body {
   width: 90px;
   height: 90px;
   border-radius: 9999px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.85), rgba(14, 116, 144, 0.55));
+  background: 
+    radial-gradient(circle, rgba(255, 255, 255, 0.85), rgba(14, 116, 144, 0.55)),
+    linear-gradient(45deg, rgba(56, 189, 248, 0.4), rgba(168, 85, 247, 0.4));
   transform: scale(calc(0.9 + (var(--pulse) * 0.5)));
   transition: transform 120ms ease-out;
-  box-shadow: 0 0 30px var(--listen-core-glow);
+  box-shadow: 
+    0 0 30px var(--listen-core-glow),
+    0 0 60px rgba(255, 255, 255, 0.2);
+  animation: listen-core-pulse 3s ease-in-out infinite;
+}
+
+@keyframes listen-core-pulse {
+  0%, 100% { 
+    transform: scale(calc(0.9 + (var(--pulse) * 0.5)));
+    box-shadow: 0 0 30px var(--listen-core-glow), 0 0 60px rgba(255, 255, 255, 0.2);
+  }
+  50% { 
+    transform: scale(calc(1.1 + (var(--pulse) * 0.5)));
+    box-shadow: 0 0 50px var(--listen-core-glow), 0 0 100px rgba(255, 255, 255, 0.3);
+  }
 }
 
 .listen-status {
@@ -213,4 +277,87 @@ body {
 .listen-control-stop {
   border-color: var(--foreground);
   color: var(--foreground);
+}
+
+/* Custom prose styles for Markdown rendering */
+.prose {
+  color: var(--foreground);
+  max-width: none;
+}
+
+.prose strong {
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  color: var(--foreground);
+  font-weight: 700;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose h1 {
+  font-size: 1.5em;
+}
+
+.prose h2 {
+  font-size: 1.25em;
+}
+
+.prose h3 {
+  font-size: 1.125em;
+}
+
+.prose p {
+  margin-bottom: 1em;
+}
+
+.prose ul, .prose ol {
+  margin-bottom: 1em;
+  padding-left: 1.5em;
+}
+
+.prose li {
+  margin-bottom: 0.25em;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  margin: 1em 0;
+}
+
+.prose a {
+  color: var(--listen-accent-6);
+  text-decoration: underline;
+}
+
+.prose code {
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 0.125em 0.25em;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+
+.prose pre {
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 1em;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+}
+
+.prose blockquote {
+  border-left: 4px solid var(--border);
+  padding-left: 1em;
+  margin: 1em 0;
+  color: var(--muted-strong);
 }

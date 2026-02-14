@@ -58,7 +58,15 @@ export default function SettingsPage() {
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
           if (settingsData?.settings) {
-            setSettings((prev) => ({ ...prev, ...settingsData.settings }));
+            const loadedModel = settingsData.settings.aiModel;
+            const safeModel =
+              loadedModel === AIModel.OPENAI ||
+              loadedModel === AIModel.CLAUDE_SONNET ||
+              loadedModel === AIModel.XAI ||
+              loadedModel === AIModel.AUTO
+                ? loadedModel
+                : AIModel.AUTO;
+            setSettings((prev) => ({ ...prev, ...settingsData.settings, aiModel: safeModel }));
           }
         }
 
@@ -102,10 +110,10 @@ export default function SettingsPage() {
         throw new Error("Failed to save settings");
       }
 
-      setStatusMessage("Narration settings saved.");
+      setStatusMessage("Response settings saved.");
     } catch (error) {
       console.error("Error saving settings:", error);
-      setStatusMessage("Unable to save narration settings.");
+      setStatusMessage("Unable to save response settings.");
     } finally {
       setIsSavingSettings(false);
     }
@@ -148,7 +156,7 @@ export default function SettingsPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold">Settings</h1>
-            <p className="text-sm text-[var(--muted)]">Adjust narration preferences and profile details.</p>
+            <p className="text-sm text-[var(--muted)]">Adjust response preferences and profile details.</p>
           </div>
           <Link
             href="/"
@@ -168,7 +176,7 @@ export default function SettingsPage() {
                 : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
-            Narration
+            Response
           </button>
           <button
             type="button"
@@ -230,6 +238,7 @@ export default function SettingsPage() {
               >
                 <option value={TextToSpeechProvider.ELEVENLABS}>ElevenLabs (Advanced)</option>
                 <option value={TextToSpeechProvider.OPENAI}>OpenAI</option>
+                <option value={TextToSpeechProvider.OPEN_SOURCE}>Open-source (Browser TTS)</option>
               </select>
             </div>
 
@@ -301,7 +310,7 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Narration Style</label>
+              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Response Style</label>
               <div className="grid grid-cols-3 gap-3">
                 {(["Realistic", "Dramatic", "Educational"] as Settings["narrationType"][]).map((type) => (
                   <button
@@ -322,7 +331,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-                Narration Duration: {settings.narrationTime} minutes
+                Read/Listen Time: {settings.narrationTime} minutes
               </label>
               <input
                 type="range"
@@ -383,7 +392,7 @@ export default function SettingsPage() {
               disabled={isSavingSettings}
               className="w-full rounded-xl bg-[var(--foreground)] py-3 text-sm font-bold uppercase tracking-widest text-[var(--background)] hover:opacity-90 disabled:opacity-60"
             >
-              {isSavingSettings ? "Saving..." : "Save Narration Settings"}
+              {isSavingSettings ? "Saving..." : "Save Response Settings"}
             </button>
           </div>
         ) : (

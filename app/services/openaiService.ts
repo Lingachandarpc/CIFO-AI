@@ -8,6 +8,17 @@ export async function generateNarrative(
   settings: Settings,
   chatHistory: Array<{ role: string; content: string }>,
   interactionMode: "read" | "listen" = "read",
+  userContext?: {
+    profile?: {
+      name?: string;
+      age?: number | null;
+      location?: string;
+      interests?: string;
+      pulse?: string;
+      bio?: string;
+    };
+    recentQueries?: string[];
+  },
   continuation?: {
     previousNarration?: string;
     userInterruption?: string;
@@ -27,6 +38,7 @@ export async function generateNarrative(
         aiModel: settings.aiModel,
         interactionMode,
         chatHistory,
+        userContext,
         continuation,
       }),
     });
@@ -45,23 +57,61 @@ export async function generateNarrative(
   }
 }
 
-export async function generateSpeech(text: string, voiceType: VoiceName): Promise<string> {
+export async function generateSpeech(text: string, voiceType: VoiceName, language?: string): Promise<string> {
   try {
-    const voiceMap: Record<VoiceName, string> = {
-      [VoiceName.ZEPHYR]: 'alloy',
-      [VoiceName.KORE]: 'nova',
-      [VoiceName.PUCK]: 'fable',
-      [VoiceName.CHARON]: 'onyx',
-      [VoiceName.FENRIR]: 'echo',
+    // Enhanced voice mapping for better native speaker experience
+    const getOpenAIVoice = (voiceType: VoiceName, language?: string): string => {
+      // Base mapping
+      const baseMap: Record<VoiceName, string> = {
+        [VoiceName.ZEPHYR]: 'alloy',  // Clear, professional
+        [VoiceName.KORE]: 'nova',    // Warm, engaging
+        [VoiceName.PUCK]: 'fable',   // Dynamic, youthful
+        [VoiceName.CHARON]: 'onyx',  // Deep, authoritative
+        [VoiceName.FENRIR]: 'echo',  // Warm, natural
+      };
+
+      let voice = baseMap[voiceType] || 'alloy';
+
+      // Language-specific optimizations for native speaker experience
+      if (language) {
+        const lang = language.toLowerCase();
+        if (lang.includes('hindi') || lang.includes('sanskrit')) {
+          voice = voiceType === VoiceName.KORE ? 'nova' : 'alloy'; // Warm voices for Indian languages
+        } else if (lang.includes('spanish') || lang.includes('portuguese')) {
+          voice = 'nova'; // Natural for Romance languages
+        } else if (lang.includes('french') || lang.includes('german')) {
+          voice = 'alloy'; // Clear for European languages
+        } else if (lang.includes('chinese') || lang.includes('japanese') || lang.includes('korean')) {
+          voice = 'echo'; // Natural for East Asian languages
+        } else if (lang.includes('arabic') || lang.includes('hebrew')) {
+          voice = 'onyx'; // Authoritative for Middle Eastern languages
+        }
+      }
+
+      return voice;
     };
 
+    const primaryVoice = getOpenAIVoice(voiceType, language);
     const res = await fetch(`${API_BASE}/tts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice: voiceMap[voiceType] }),
+      body: JSON.stringify({ text, voice: primaryVoice }),
     });
 
     if (!res.ok) {
+      if (primaryVoice !== 'alloy') {
+        const retry = await fetch(`${API_BASE}/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice: 'alloy' }),
+        });
+
+        if (retry.ok) {
+          const data = await retry.json();
+          return data.audio || '';
+        }
+      }
+
       const payload = await res.json().catch(() => ({}));
       console.error('TTS proxy error:', payload);
       return '';

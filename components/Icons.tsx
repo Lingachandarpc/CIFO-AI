@@ -37,7 +37,8 @@ export const PlayIcon: React.FC<IconProps> = ({ className = "w-6 h-6" }) => (
 
 export const MicIcon: React.FC<IconProps> = ({ className = "w-6 h-6" }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 1a4 4 0 00-4 4v6a4 4 0 008 0V5a4 4 0 00-4-4z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 10v1a7 7 0 01-14 0v-1M12 21v-3" />
   </svg>
 );
 

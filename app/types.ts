@@ -40,6 +40,7 @@ export enum VoiceGender {
 export enum TextToSpeechProvider {
   OPENAI = "openai",
   ELEVENLABS = "elevenlabs",
+  OPEN_SOURCE = "open-source",
 }
 
 export enum AIModel {
@@ -82,6 +83,15 @@ export interface ChatMessage {
   timestamp: Date;
   mode?: SearchMode;
   audioBlob?: string;
+  modelUsed?: AIModel;
+}
+
+export interface VoiceProfile {
+  genre?: string;
+  tone?: "calm" | "neutral" | "intense";
+  pace?: "slow" | "medium" | "fast";
+  pitch?: "low" | "medium" | "high";
+  slang?: "none" | "light" | "moderate";
 }
 
 export interface HistoryItem {
@@ -94,5 +104,8 @@ export interface HistoryItem {
   audioBlob?: string;
   genre?: string;
   suggestion?: string;
+  suggestions?: string[];
+  modelUsed?: AIModel;
+  voiceProfile?: VoiceProfile;
   conversation?: Array<Pick<ChatMessage, "role" | "content" | "timestamp">>;
 }
