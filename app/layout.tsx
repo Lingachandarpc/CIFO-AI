@@ -24,6 +24,11 @@ export const metadata: Metadata = {
   description: "Self companion AI app.",
 };
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{

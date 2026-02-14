@@ -2047,7 +2047,7 @@ export default function HomeView() {
         {interactionMode === "read" && (
           <div className="sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-3 md:p-8">
             <div className="max-w-3xl mx-auto">
-              <form onSubmit={handleSubmit} className="relative group">
+              <form onSubmit={handleSubmit} className="relative group md:relative fixed bottom-0 left-0 right-0 md:static z-10 bg-[var(--background)] p-4 md:p-0 border-t md:border-t-0 border-[var(--border)]">
                 {messages.length > 0 && (
                   <button
                     type="button"
@@ -2072,7 +2072,7 @@ export default function HomeView() {
                   value={inputValue}
                   onChange={(e) => { setInputValue(e.target.value); stopNarration(); }}
                   placeholder="Ask a story, case, or question..."
-                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-3.5 pl-12 pr-12 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-sm md:text-base placeholder-[var(--muted)]"
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-3.5 pl-12 pr-12 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-base placeholder-[var(--muted)]"
                 />
 
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
