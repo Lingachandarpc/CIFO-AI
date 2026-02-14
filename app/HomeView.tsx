@@ -1443,7 +1443,7 @@ export default function HomeView() {
               id: `tts-error-${Date.now()}`,
               role: 'assistant',
               content: 'Audio narration failed. The text response is shown below.',
-              timestamp: new Date().toISOString(),
+              timestamp: new Date(),
               mode: currentMode,
             }]);
             setListenStatus(isMicMutedRef.current ? "idle" : "listening");
