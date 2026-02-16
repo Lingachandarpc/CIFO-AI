@@ -28,6 +28,11 @@ export async function POST(req: Request) {
     const isListenMode = interactionMode === "listen";
     const userInstructions = isListenMode
       ? `
+Answer the user's question directly:
+"${query}"
+
+Language: ${language}
+
 Reply in a conversational chat style that answers the user's question directly.
 Rules:
 - Plain text only (no markdown, no tables, no emojis, no code blocks).

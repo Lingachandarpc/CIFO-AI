@@ -14,9 +14,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { text, voice, languageCode, speakingRate, pitch } = await req.json();
+    const { text, ssml, voice, languageCode, speakingRate, pitch } = await req.json();
 
-    if (!text || !voice || !languageCode) {
+    if ((!text && !ssml) || !voice || !languageCode) {
       return NextResponse.json(
         { error: 'Missing required fields: text, voice, languageCode' },
         { status: 400 }
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify({
-          input: { text },
+          input: ssml ? { ssml } : { text },
           voice: { languageCode, name: voice },
           audioConfig: {
             audioEncoding: 'MP3',

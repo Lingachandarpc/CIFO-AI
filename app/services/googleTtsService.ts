@@ -32,6 +32,38 @@ const FALLBACK_VOICE = (languageCode: string): GoogleVoice => ({
   ssmlGender: 'NEUTRAL',
 });
 
+const QUALITY_HINTS = ['Neural2', 'Wavenet', 'Studio', 'Journey', 'Standard'];
+
+const isEnglishLanguage = (languageCode: string) => languageCode.startsWith('en-');
+
+const getInlineEnglishLang = (languageCode: string) =>
+  languageCode.endsWith('-IN') ? 'en-IN' : 'en-US';
+
+const escapeXml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const buildGoogleSsml = (text: string, languageCode: string) => {
+  if (!text || isEnglishLanguage(languageCode)) return '';
+
+  const englishLang = getInlineEnglishLang(languageCode);
+  const tokenRegex = /([A-Za-z][A-Za-z'.\-]{1,})/g;
+  const wrapped = escapeXml(text).replace(tokenRegex, (match) =>
+    `<lang xml:lang="${englishLang}">${match}</lang>`
+  );
+
+  return `<speak><lang xml:lang="${languageCode}">${wrapped}</lang></speak>`;
+};
+
+const sortVoicesByQuality = (voices: GoogleVoice[]) => {
+  return [...voices].sort((a, b) => {
+    const aIndex = QUALITY_HINTS.findIndex((hint) => a.name.includes(hint));
+    const bIndex = QUALITY_HINTS.findIndex((hint) => b.name.includes(hint));
+    const aScore = aIndex === -1 ? QUALITY_HINTS.length : aIndex;
+    const bScore = bIndex === -1 ? QUALITY_HINTS.length : bIndex;
+    return aScore - bScore;
+  });
+};
+
 export const getGoogleLanguageCode = (language: Language): string =>
   LANGUAGE_CODE_MAP[language] || 'en-US';
 
@@ -54,7 +86,7 @@ export const resolveGoogleVoice = (
   const filtered = filterVoicesByGender(voices, gender);
   const exact = filtered.find((voice) => voice.name === desiredName);
   if (exact) return exact;
-  const fallback = filtered[0] || voices[0];
+  const fallback = sortVoicesByQuality(filtered)[0] || sortVoicesByQuality(voices)[0];
   return fallback || null;
 };
 
@@ -76,7 +108,7 @@ export async function listGoogleVoices(language: Language): Promise<GoogleVoice[
       return [FALLBACK_VOICE(languageCode)];
     }
 
-    return voices;
+    return sortVoicesByQuality(voices);
   } catch (error) {
     console.error('Failed to load Google voices:', error);
     return [FALLBACK_VOICE(languageCode)];
@@ -91,11 +123,13 @@ export async function generateSpeechWithGoogle(
   pitch = 0
 ): Promise<string> {
   try {
+    const ssml = buildGoogleSsml(text, languageCode);
     const res = await fetch('/api/chronoread/google/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
+        ssml,
         voice: voiceName || DEFAULT_GOOGLE_VOICE,
         languageCode,
         speakingRate,

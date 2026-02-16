@@ -302,6 +302,9 @@ export default function HomeView() {
   const lastListenQueryRef = useRef<string>('');
   const activeListenSessionIdRef = useRef<string | null>(null);
   const activeReadSessionIdRef = useRef<string | null>(null);
+  const lastMicInterruptAtRef = useRef<number>(0);
+  const lastListenTranscriptRef = useRef<string>('');
+  const lastListenTranscriptAtRef = useRef<number>(0);
   const handleListenTranscriptRef = useRef<(transcript: string) => void>(() => {});
   const userMessages = useMemo(() => messages.filter((msg) => msg.role === 'user'), [messages]);
 
@@ -345,6 +348,16 @@ export default function HomeView() {
         const transcript = event.results?.[0]?.[0]?.transcript || '';
         if (!transcript.trim()) return;
         if (interactionModeRef.current === "listen") {
+          if (listenRequestPendingRef.current || isLoading) return;
+          const now = performance.now();
+          if (
+            transcript.trim() === lastListenTranscriptRef.current &&
+            now - lastListenTranscriptAtRef.current < 3000
+          ) {
+            return;
+          }
+          lastListenTranscriptRef.current = transcript.trim();
+          lastListenTranscriptAtRef.current = now;
           if (isNarratingRef.current) stopNarration();
           void handleListenTranscriptRef.current(transcript.trim());
         } else {
@@ -359,9 +372,14 @@ export default function HomeView() {
 
       recognitionRef.current.onend = () => {
         setIsListening(false);
-        if (interactionModeRef.current === "listen" && !isMicMutedRef.current) {
-          startRecognition(true);
-          return;
+        if (interactionModeRef.current === "listen") {
+          if (listenRequestPendingRef.current || isNarratingRef.current || ttsSessionRef.current) {
+            return;
+          }
+          if (!isMicMutedRef.current) {
+            startRecognition(true);
+            return;
+          }
         }
         if (interactionModeRef.current !== "listen") {
           setMicMuted(true);
@@ -723,7 +741,7 @@ export default function HomeView() {
     text = lines.join(' ');
 
     text = text.replace(/[\p{Extended_Pictographic}]/gu, '');
-    text = text.replace(/[^\p{L}\p{N}\s.,;:!?"'()\-]/gu, ' ');
+    text = text.replace(/[^\p{L}\p{M}\p{N}\s.,;:!?"'()\-]/gu, ' ');
     text = text.replace(/\s+/g, ' ').trim();
     return text;
   };
@@ -1013,6 +1031,21 @@ export default function HomeView() {
     const tick = () => {
       const micLevel = getAnalyserLevel(micAnalyserRef.current);
       const narrationLevel = getAnalyserLevel(narrationAnalyserRef.current);
+      if (
+        interactionModeRef.current === "listen" &&
+        isNarratingRef.current &&
+        !isMicMutedRef.current &&
+        !listenRequestPendingRef.current
+      ) {
+        const now = performance.now();
+        const micDominant = micLevel > 0.08 && micLevel > narrationLevel * 1.2;
+        if (micDominant && now - lastMicInterruptAtRef.current > 1500) {
+          lastMicInterruptAtRef.current = now;
+          handleStopNarration();
+          setRecognitionLanguage();
+          startRecognition(true);
+        }
+      }
       const combined = Math.min(1, micLevel * 2.2 + narrationLevel * 2.6);
       setPulse(combined);
       animationFrameRef.current = requestAnimationFrame(tick);
@@ -1184,6 +1217,7 @@ export default function HomeView() {
           hasStartedNarration = true;
           options?.onStart?.();
           if (options?.listenMode) {
+            stopRecognition();
             setListenStatus('narrating');
             startAmbientMusic(options.genre || null);
           }
@@ -1203,6 +1237,10 @@ export default function HomeView() {
       options?.onFinish?.();
       if (options?.listenMode) {
         setListenStatus(isMicMutedRef.current ? 'idle' : 'listening');
+        if (!isMicMutedRef.current && !listenRequestPendingRef.current) {
+          setRecognitionLanguage();
+          startRecognition(true);
+        }
       }
     }
 
@@ -1247,7 +1285,13 @@ export default function HomeView() {
     const profilePitch = voiceProfile?.pitch === 'high' ? 2 : voiceProfile?.pitch === 'low' ? -4 : 0;
     const pitchValue = Math.max(-8, Math.min(8, basePitch + profilePitch));
     const resolvedGoogleVoice = resolveGoogleVoice(googleVoices, settings.voiceType, settings.voiceGender);
-    const googleVoiceName = resolvedGoogleVoice?.name || settings.voiceType || DEFAULT_GOOGLE_VOICE;
+    const googleVoiceName =
+      resolvedGoogleVoice?.name ||
+      (settings.voiceType?.startsWith(googleLanguageCode) ? settings.voiceType : `${googleLanguageCode}-Standard-A`) ||
+      DEFAULT_GOOGLE_VOICE;
+    const googleRate = settings.language === Language.ENGLISH
+      ? paceRate
+      : Math.max(0.7, Math.min(1.1, paceRate * 0.9));
 
     for (const provider of providerOrder) {
       if (provider === TextToSpeechProvider.GOOGLE) {
@@ -1256,7 +1300,7 @@ export default function HomeView() {
             text,
             googleVoiceName,
             googleLanguageCode,
-            paceRate,
+            googleRate,
             pitchValue
           );
           if (googleAudio) return googleAudio;
@@ -1359,6 +1403,10 @@ export default function HomeView() {
       stopAmbientMusic();
       if (options?.listenMode) {
         setListenStatus(isMicMutedRef.current ? 'idle' : 'listening');
+        if (!isMicMutedRef.current && !listenRequestPendingRef.current) {
+          setRecognitionLanguage();
+          startRecognition(true);
+        }
       }
       options?.onComplete?.();
     };
@@ -1399,6 +1447,7 @@ export default function HomeView() {
 
       if (!hasStartedNarration && options?.listenMode) {
         hasStartedNarration = true;
+        stopRecognition();
         setListenStatus('narrating');
         startAmbientMusic(options.genre || null);
       }
@@ -1449,6 +1498,20 @@ export default function HomeView() {
       handleStopNarration();
     }
   };
+
+  useEffect(() => {
+    if (interactionModeRef.current !== "listen") return;
+    stopNarration();
+    listenRequestPendingRef.current = false;
+    ttsSessionRef.current = null;
+    if (!isMicMutedRef.current) {
+      setListenStatus("listening");
+      setRecognitionLanguage();
+      startRecognition(true);
+    } else {
+      setListenStatus("idle");
+    }
+  }, [settings.narrationType]);
 
   const stopAndReturnToRead = () => {
     handleStopNarration();
@@ -1905,9 +1968,7 @@ export default function HomeView() {
     const wasNarrating = isNarratingRef.current;
     const requestTimestamp = new Date();
     listenRequestPendingRef.current = true;
-    if (!activeListenSessionIdRef.current) {
-      lastListenQueryRef.current = transcript;
-    }
+    lastListenQueryRef.current = transcript;
     if (wasNarrating) {
       stopNarration();
     }
@@ -1926,7 +1987,7 @@ export default function HomeView() {
 
     const pendingHistoryItem: HistoryItem = {
       id: historyId,
-      query: existingItem?.query || transcript,
+      query: transcript,
       mode: currentMode,
       interactionMode: "listen",
       timestamp: requestTimestamp,
@@ -1947,10 +2008,10 @@ export default function HomeView() {
     setIsLoading(true);
 
     try {
-      const continuation = lastNarrationRef.current
+      const continuation = wasNarrating && lastNarrationRef.current
         ? {
             previousNarration: lastNarrationRef.current,
-            userInterruption: wasNarrating ? transcript : undefined,
+            userInterruption: transcript,
           }
         : undefined;
 
@@ -2027,7 +2088,7 @@ export default function HomeView() {
 
       const historyItem: HistoryItem = {
         id: historyId,
-        query: existingItem?.query || transcript,
+        query: transcript,
         mode: currentMode,
         interactionMode: "listen",
         timestamp: now,
@@ -2171,6 +2232,78 @@ export default function HomeView() {
       setActiveNarrationKey(null);
     }
     setIsHistoryNarrationLoading(false);
+    setListenStatus('idle');
+  };
+
+  const handleNarrateReadMessage = async (msg: ChatMessage) => {
+    if (msg.role !== 'assistant') return;
+    if (isNarrating && activeNarrationKeyRef.current === msg.id) {
+      handleStopNarration();
+      return;
+    }
+
+    handleStopNarration();
+    activeNarrationKeyRef.current = msg.id;
+    setActiveNarrationKey(msg.id);
+    setListenStatus('thinking');
+
+    const excerpt = getTtsExcerpt(msg.content, 'read');
+
+    if (settings.ttsProvider === TextToSpeechProvider.OPEN_SOURCE) {
+      try {
+        playBrowserTTS(excerpt, {
+          onComplete: () => {
+            if (activeNarrationKeyRef.current === msg.id) {
+              activeNarrationKeyRef.current = null;
+              setActiveNarrationKey(null);
+            }
+            setListenStatus('idle');
+          },
+        });
+      } catch (fallbackError) {
+        console.error('Browser TTS failed:', fallbackError);
+        setListenStatus('idle');
+      }
+      return;
+    }
+
+    const playStatus = await playTtsInChunks(excerpt, undefined, {
+      listenMode: false,
+      onStart: () => setListenStatus('narrating'),
+      onFinish: () => setListenStatus('idle'),
+    });
+
+    if (playStatus === 'timeout') {
+      if (activeNarrationKeyRef.current === msg.id) {
+        activeNarrationKeyRef.current = null;
+        setActiveNarrationKey(null);
+      }
+      setListenStatus('idle');
+      return;
+    }
+
+    if (playStatus === 'failed') {
+      try {
+        playBrowserTTS(excerpt, {
+          onComplete: () => {
+            if (activeNarrationKeyRef.current === msg.id) {
+              activeNarrationKeyRef.current = null;
+              setActiveNarrationKey(null);
+            }
+            setListenStatus('idle');
+          },
+        });
+      } catch (fallbackError) {
+        console.error('Browser TTS fallback failed:', fallbackError);
+        setListenStatus('idle');
+      }
+      return;
+    }
+
+    if (activeNarrationKeyRef.current === msg.id) {
+      activeNarrationKeyRef.current = null;
+      setActiveNarrationKey(null);
+    }
     setListenStatus('idle');
   };
 
@@ -2551,9 +2684,15 @@ export default function HomeView() {
                         ) : (
                           displayContent
                         )}
-                      {msg.audioBlob && (
-                        <button 
-                          onClick={() => handlePlayAudio(msg.audioBlob!)}
+                      {msg.role === 'assistant' && (
+                        <button
+                          onClick={() => {
+                            if (msg.audioBlob) {
+                              handlePlayAudio(msg.audioBlob);
+                            } else {
+                              void handleNarrateReadMessage(msg);
+                            }
+                          }}
                           className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-[var(--foreground)] text-[var(--background)] rounded-full text-xs font-bold hover:opacity-90 transition-colors"
                         >
                           <PlayIcon className="w-4 h-4" />
