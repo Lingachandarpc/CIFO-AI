@@ -1,5 +1,5 @@
 import prisma from '../../lib/prisma'
-import { Settings, SearchMode, VoiceName, Language, VoiceGender, TextToSpeechProvider, AIModel } from '../types'
+import { Settings, SearchMode, Language, VoiceGender, TextToSpeechProvider, AIModel, DEFAULT_GOOGLE_VOICE } from '../types'
 
 /**
  * UserService: Manages user profiles, settings, and chat history.
@@ -15,12 +15,11 @@ export async function getUserSettings(userId: number): Promise<Settings | null> 
     if (!settings) return null
 
     return {
-      narrationTime: settings.narrationTime,
       narrationType: settings.narrationType as Settings['narrationType'],
-      voiceType: settings.voiceType as VoiceName,
+      voiceType: settings.voiceType,
       voiceGender: (settings.voiceGender as VoiceGender) || VoiceGender.AUTO,
       language: settings.language as Language,
-      ttsProvider: (settings.ttsProvider as TextToSpeechProvider) || TextToSpeechProvider.ELEVENLABS,
+      ttsProvider: (settings.ttsProvider as TextToSpeechProvider) || TextToSpeechProvider.GOOGLE,
       aiModel: (settings.aiModel as AIModel) || AIModel.AUTO,
       enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
       backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
@@ -38,21 +37,17 @@ export async function updateUserSettings(
   try {
     const createData = {
       userId,
-      narrationTime: settings.narrationTime ?? 5,
       narrationType: settings.narrationType ?? 'Realistic',
-      voiceType: settings.voiceType ?? 'zephyr',
+      voiceType: settings.voiceType ?? DEFAULT_GOOGLE_VOICE,
       voiceGender: settings.voiceGender ?? 'auto',
       language: settings.language ?? 'English',
-      ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+      ttsProvider: settings.ttsProvider ?? TextToSpeechProvider.GOOGLE,
       aiModel: settings.aiModel ?? 'auto',
       enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
       backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
     };
 
     const updateData = {
-      ...(settings.narrationTime !== undefined && {
-        narrationTime: settings.narrationTime,
-      }),
       ...(settings.narrationType && { narrationType: settings.narrationType }),
       ...(settings.voiceType && { voiceType: settings.voiceType }),
       ...(settings.voiceGender && { voiceGender: settings.voiceGender }),
@@ -87,19 +82,15 @@ export async function updateUserSettings(
           where: { userId },
           create: {
             userId,
-            narrationTime: settings.narrationTime ?? 5,
             narrationType: settings.narrationType ?? 'Realistic',
-            voiceType: settings.voiceType ?? 'zephyr',
+            voiceType: settings.voiceType ?? DEFAULT_GOOGLE_VOICE,
             language: settings.language ?? 'English',
-            ttsProvider: settings.ttsProvider ?? 'elevenlabs',
+            ttsProvider: settings.ttsProvider ?? TextToSpeechProvider.GOOGLE,
             aiModel: settings.aiModel ?? 'auto',
             enableBackgroundMusic: settings.enableBackgroundMusic ?? true,
             backgroundMusicVolume: settings.backgroundMusicVolume ?? 0.15,
           },
           update: {
-            ...(settings.narrationTime !== undefined && {
-              narrationTime: settings.narrationTime,
-            }),
             ...(settings.narrationType && { narrationType: settings.narrationType }),
             ...(settings.voiceType && { voiceType: settings.voiceType }),
             ...(settings.language && { language: settings.language }),

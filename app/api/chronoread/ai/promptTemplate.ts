@@ -46,6 +46,11 @@ export function buildPromptTemplate(input: PromptTemplateInput) {
     .filter(Boolean)
     .slice(0, 6);
 
+  const recencyStamp = new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+  }).format(new Date());
+
   const historyTopics = input.chatHistory
     .filter((entry) => entry.role === "user")
     .map((entry) => clean(entry.content))
@@ -58,7 +63,18 @@ export function buildPromptTemplate(input: PromptTemplateInput) {
   const need = inferNeed(input.query);
   const mood = inferMood(input.query, pulseText);
 
-  const sourceCoverageInstruction = `For evidence grounding, include source-oriented context from: books, journals/research, news/current affairs, web/social conversations, and practitioner/industry references. If a source bucket is weak, explicitly write "Not confidently available" for that bucket instead of fabricating.`;
+  const sourceCoverageInstruction = `For evidence grounding, include source-oriented context from: books, journals/research, news/current affairs, web/social conversations, and practitioner/industry references. If a source bucket—especially books—is weak, immediately reinforce it with contemporary magazine features, investigative news, or verified web updates published around ${recencyStamp}. Only use "Not confidently available" when every adjacent signal truly lacks data, and never respond with "I couldn't find book references"—pivot to the freshest trustworthy material instead.`;
+
+  const readModeEnhancement = input.interactionMode === "read"
+    ? `
+Read-mode formatting requirements:
+- Include at least one Markdown table with concrete data.
+- Include one text-based pictogram in a fenced code block labeled \`diagram\`.
+- Include one tabbed block in a fenced code block labeled \`tabs\`, using lines like "Tab: Label" to separate tabs.
+- Include one slider block in a fenced code block labeled \`slider\` with keys: label, value, left, right.
+- Add a few relevant emojis to guide scanning, but do not overuse them.
+`
+    : '';
 
   const outputContract = `Produce a naturally structured response with adaptive headings based on the user's query and context.
 Use standard Markdown syntax throughout: **Heading Text** for all section headings, *text* for italic emphasis, ![alt text](image_url) for images, - for bullet points.
@@ -67,6 +83,8 @@ Keep structure clear but not template-like.
 Place each **heading** on its own line and separate major sections with a blank line.
 Include evidence-backed insights from books, journals/research, news/current signals, and web/social discourse when relevant.
 Include relevant web images using Markdown image syntax when they add value to the explanation.
+Include a **Summary** section near the end with 3-5 bullet points, and ensure the final sentence is complete (no abrupt cutoffs).
+${readModeEnhancement}
 End with one machine-parseable line:
 Suggested Next Topics: topic 1 | topic 2 | topic 3`;
 

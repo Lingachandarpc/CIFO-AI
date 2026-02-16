@@ -67,9 +67,8 @@ function initializeSchema() {
     CREATE TABLE IF NOT EXISTS user_settings (
       id TEXT PRIMARY KEY,
       userId TEXT UNIQUE NOT NULL,
-      narrationTime INTEGER DEFAULT 5,
       narrationType TEXT DEFAULT 'Realistic',
-      voiceType TEXT DEFAULT 'zephyr',
+      voiceType TEXT DEFAULT 'en-US-Standard-C',
       language TEXT DEFAULT 'English',
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,

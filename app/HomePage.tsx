@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, VoiceGender, TextToSpeechProvider, AIModel } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, Language, VoiceGender, TextToSpeechProvider, AIModel, DEFAULT_GOOGLE_VOICE } from './types';
+import { listGoogleVoices, GoogleVoice } from './services/googleTtsService';
 import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, GlobeIcon } from '../components/Icons';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
 
@@ -14,16 +15,16 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [settings, setSettings] = useState<Settings>({
-    narrationTime: 5,
     narrationType: 'Realistic',
-    voiceType: VoiceName.ZEPHYR,
+    voiceType: DEFAULT_GOOGLE_VOICE,
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
-    ttsProvider: TextToSpeechProvider.ELEVENLABS,
+    ttsProvider: TextToSpeechProvider.GOOGLE,
     aiModel: AIModel.AUTO,
     enableBackgroundMusic: true,
     backgroundMusicVolume: 0.15,
   });
+  const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -81,6 +82,26 @@ export default function Home() {
       };
     }
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    listGoogleVoices(settings.language)
+      .then((voices) => {
+        if (!isActive) return;
+        setGoogleVoices(voices);
+        if (!voices.find((voice) => voice.name === settings.voiceType)) {
+          setSettings((prev) => ({
+            ...prev,
+            voiceType: voices[0]?.name || DEFAULT_GOOGLE_VOICE,
+          }));
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isActive = false;
+    };
+  }, [settings.language, settings.voiceType]);
 
   const toggleListening = () => {
     if (isListening) {
@@ -144,11 +165,11 @@ export default function Home() {
       timestamp: new Date(),
       interactionMode: "read",
     };
-    const updatedHistory = [newItem, ...history].slice(0, 10);
-    setHistory(updatedHistory);
-    localStorage.setItem('narrative_history_guest', JSON.stringify(updatedHistory));
-  };
-
+                  {googleVoices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} ({voice.ssmlGender})
+                    </option>
+                  ))}
   const handlePlayAudio = async (base64: string) => {
     initAudio();
     if (!audioContextRef.current) return;
@@ -483,23 +504,6 @@ export default function Home() {
               </div>
 
               <div className="space-y-3">
-                <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Read/Listen Time</label>
-                <input 
-                  type="range" 
-                  min="1" 
-                  max="15" 
-                  value={settings.narrationTime}
-                  onChange={(e) => setSettings({ ...settings, narrationTime: parseInt(e.target.value) })}
-                  className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-white"
-                />
-                <div className="flex justify-between text-xs text-neutral-500">
-                  <span>1 min</span>
-                  <span className="text-white font-bold">{settings.narrationTime} mins</span>
-                  <span>15 mins</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
                 <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Response Style</label>
                 <div className="grid grid-cols-3 gap-2">
                   {['Realistic', 'Dramatic', 'Educational'].map((type) => (
@@ -518,14 +522,14 @@ export default function Home() {
                 <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Neural Voice Persona</label>
                 <select 
                   value={settings.voiceType}
-                  onChange={(e) => setSettings({ ...settings, voiceType: e.target.value as VoiceName })}
+                  onChange={(e) => setSettings({ ...settings, voiceType: e.target.value })}
                   className="w-full bg-neutral-800 border border-neutral-700 rounded-xl py-3 px-4 focus:outline-none focus:border-white text-sm"
                 >
-                  <option value={VoiceName.ZEPHYR}>Zephyr (Smooth & Calming)</option>
-                  <option value={VoiceName.KORE}>Kore (Professional & Sharp)</option>
-                  <option value={VoiceName.PUCK}>Puck (Playful & High-energy)</option>
-                  <option value={VoiceName.CHARON}>Charon (Deep & Narrator-like)</option>
-                  <option value={VoiceName.FENRIR}>Fenrir (Bold & Powerful)</option>
+                  {googleVoices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} ({voice.ssmlGender})
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -543,4 +547,5 @@ export default function Home() {
       )}
     </div>
   );
+}
 }

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Settings, VoiceName, Language, TextToSpeechProvider, VoiceGender, AIModel } from '../app/types';
-import { ELEVENLABS_VOICES, getVoicesForLanguageAndGender } from '../app/services/elevenLabsService';
+import { Settings, Language, TextToSpeechProvider, VoiceGender, AIModel } from '../app/types';
+import { getVoicesForLanguageAndGender } from '../app/services/elevenLabsService';
 
 interface SettingsModalProps {
   settings: Settings;
@@ -9,7 +9,10 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ settings, onSettingsChange, onClose }: SettingsModalProps) {
-  const availableVoices = getVoicesForLanguageAndGender(settings.language, settings.voiceGender);
+  const resolvePreferredVoice = (gender: VoiceGender) => {
+    const preferred = getVoicesForLanguageAndGender(settings.language, gender);
+    return preferred[0] || settings.voiceType;
+  };
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -41,6 +44,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
             <option value={AIModel.AUTO}>Auto (fastest available)</option>
             <option value={AIModel.OPENAI}>OpenAI</option>
             <option value={AIModel.CLAUDE_SONNET}>Claude Sonnet</option>
+            <option value={AIModel.GEMINI}>Gemini</option>
             <option value={AIModel.XAI}>xAI</option>
           </select>
           <p className="text-xs text-[var(--muted)] mt-1">
@@ -83,6 +87,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
               onSettingsChange({
                 ...settings,
                 language: e.target.value as Language,
+                voiceType: getVoicesForLanguageAndGender(e.target.value as Language, settings.voiceGender)[0] || settings.voiceType,
               })
             }
             className="w-full bg-[var(--surface-strong)] text-[var(--foreground)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--muted-strong)]"
@@ -108,6 +113,7 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
                   onSettingsChange({
                     ...settings,
                     voiceGender: gender,
+                    voiceType: resolvePreferredVoice(gender),
                   })
                 }
                 className={`p-2 rounded transition-all text-sm font-medium capitalize ${
@@ -120,36 +126,9 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
               </button>
             ))}
           </div>
-          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-            Voice Persona
-          </label>
-          <div className="grid grid-cols-1 gap-3">
-            {availableVoices.map((voiceName: VoiceName) => {
-              const voice = ELEVENLABS_VOICES[voiceName];
-              return (
-                <button
-                  key={voiceName}
-                  onClick={() =>
-                    onSettingsChange({
-                      ...settings,
-                      voiceType: voiceName,
-                    })
-                  }
-                  className={`p-3 rounded-lg text-left transition-all ${
-                    settings.voiceType === voiceName
-                      ? 'bg-[var(--foreground)] text-[var(--background)] font-semibold'
-                      : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:bg-[var(--surface)]'
-                  }`}
-                >
-                  <div className="font-semibold capitalize">{voice.name}</div>
-                  <div className="text-xs opacity-80">{voice.description}</div>
-                </button>
-              );
-            })}
-          </div>
-          {availableVoices.length === 0 && (
-            <p className="text-xs text-[var(--muted)]">No voices available for this language</p>
-          )}
+          <p className="text-xs text-[var(--muted)]">
+            Auto matches language cadence. Selected: {settings.voiceGender}.
+          </p>
         </div>
 
         {/* Response Style */}
@@ -177,68 +156,6 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Read/Listen Duration */}
-        <div className="mb-6">
-          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-            Read/Listen Time: {settings.narrationTime} minutes
-          </label>
-          <input
-            type="range"
-            min="2"
-            max="15"
-            value={settings.narrationTime}
-            onChange={(e) =>
-              onSettingsChange({
-                ...settings,
-                narrationTime: parseInt(e.target.value),
-              })
-            }
-            className="w-full accent-[var(--foreground)]"
-          />
-        </div>
-
-        {/* Background Music Settings */}
-        <div className="mb-6 p-4 bg-[var(--surface-strong)] rounded-lg border border-[var(--border)]">
-          <label className="flex items-center gap-2 mb-3">
-            <input
-              type="checkbox"
-              checked={settings.enableBackgroundMusic}
-              onChange={(e) =>
-                onSettingsChange({
-                  ...settings,
-                  enableBackgroundMusic: e.target.checked,
-                })
-              }
-              className="w-4 h-4 accent-[var(--foreground)] cursor-pointer"
-            />
-            <span className="text-sm font-semibold text-[var(--muted-strong)]">
-              Enable Genre-Specific Background Music
-            </span>
-          </label>
-
-          {settings.enableBackgroundMusic && (
-            <div>
-              <label className="block text-xs font-semibold text-[var(--muted)] mb-2">
-                Music Volume: {Math.round(settings.backgroundMusicVolume * 100)}%
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={settings.backgroundMusicVolume}
-                onChange={(e) =>
-                  onSettingsChange({
-                    ...settings,
-                    backgroundMusicVolume: parseFloat(e.target.value),
-                  })
-                }
-                className="w-full accent-[var(--foreground)]"
-              />
-            </div>
-          )}
         </div>
 
         {/* Settings Info */}

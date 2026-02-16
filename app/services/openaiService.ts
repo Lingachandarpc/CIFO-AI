@@ -1,4 +1,4 @@
-import { SearchMode, Settings, VoiceName, Language, TextToSpeechProvider } from '../types';
+import { SearchMode, Settings, VoiceName, Language } from '../types';
 
 const API_BASE = '/api/chronoread';
 
@@ -32,7 +32,6 @@ export async function generateNarrative(
       body: JSON.stringify({ 
         query, 
         category,
-        narrationTime: settings.narrationTime,
         narrationType: settings.narrationType,
         language: settings.language,
         aiModel: settings.aiModel,
@@ -57,10 +56,10 @@ export async function generateNarrative(
   }
 }
 
-export async function generateSpeech(text: string, voiceType: VoiceName, language?: string): Promise<string> {
+export async function generateSpeech(text: string, voiceType: string, language?: string): Promise<string> {
   try {
     // Enhanced voice mapping for better native speaker experience
-    const getOpenAIVoice = (voiceType: VoiceName, language?: string): string => {
+    const getOpenAIVoice = (voiceType: string, language?: string): string => {
       // Base mapping
       const baseMap: Record<VoiceName, string> = {
         [VoiceName.ZEPHYR]: 'alloy',  // Clear, professional
@@ -70,13 +69,16 @@ export async function generateSpeech(text: string, voiceType: VoiceName, languag
         [VoiceName.FENRIR]: 'echo',  // Warm, natural
       };
 
-      let voice = baseMap[voiceType] || 'alloy';
+      const isLegacyVoice = Object.values(VoiceName).includes(voiceType as VoiceName);
+      const resolvedVoice = isLegacyVoice ? (voiceType as VoiceName) : VoiceName.ZEPHYR;
+
+      let voice = baseMap[resolvedVoice] || 'alloy';
 
       // Language-specific optimizations for native speaker experience
       if (language) {
         const lang = language.toLowerCase();
         if (lang.includes('hindi') || lang.includes('sanskrit')) {
-          voice = voiceType === VoiceName.KORE ? 'nova' : 'alloy'; // Warm voices for Indian languages
+          voice = resolvedVoice === VoiceName.KORE ? 'nova' : 'alloy'; // Warm voices for Indian languages
         } else if (lang.includes('spanish') || lang.includes('portuguese')) {
           voice = 'nova'; // Natural for Romance languages
         } else if (lang.includes('french') || lang.includes('german')) {

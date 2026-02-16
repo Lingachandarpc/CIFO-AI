@@ -38,16 +38,20 @@ export enum VoiceGender {
 }
 
 export enum TextToSpeechProvider {
+  GOOGLE = "google",
   OPENAI = "openai",
   ELEVENLABS = "elevenlabs",
   OPEN_SOURCE = "open-source",
 }
+
+export const DEFAULT_GOOGLE_VOICE = "en-US-Standard-C";
 
 export enum AIModel {
   AUTO = "auto",
   OPENAI = "openai",
   CLAUDE_SONNET = "claude-sonnet",
   XAI = "xai",
+  GEMINI = "gemini",
 }
 
 export enum Genre {
@@ -65,9 +69,8 @@ export enum Genre {
 }
 
 export interface Settings {
-  narrationTime: number;
   narrationType: "Realistic" | "Dramatic" | "Educational";
-  voiceType: VoiceName;
+  voiceType: string;
   voiceGender: VoiceGender;
   language: Language;
   ttsProvider: TextToSpeechProvider;
@@ -84,6 +87,7 @@ export interface ChatMessage {
   mode?: SearchMode;
   audioBlob?: string;
   modelUsed?: AIModel;
+  animate?: boolean;
 }
 
 export interface VoiceProfile {

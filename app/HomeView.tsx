@@ -1,16 +1,184 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, VoiceName, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel, VoiceProfile } from './types';
-import { BookIcon, CaseStudyIcon, SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon } from '../components/Icons';
+import { SearchMode, Settings, ChatMessage, HistoryItem, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel, VoiceProfile, DEFAULT_GOOGLE_VOICE } from './types';
+import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
-import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer } from './services/openaiService';
-import { generateSpeechWithElevenLabs, getVoicesForLanguageAndGender } from './services/elevenLabsService';
+import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions } from './services/openaiService';
+import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
+import { filterVoicesByGender, generateSpeechWithGoogle, getGoogleLanguageCode, listGoogleVoices, resolveGoogleVoice, GoogleVoice } from './services/googleTtsService';
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+type TabsBlock = { label: string; content: string };
+
+const parseTabsBlock = (raw: string): TabsBlock[] => {
+  const lines = raw.split(/\r?\n/);
+  const tabs: TabsBlock[] = [];
+  let current: TabsBlock | null = null;
+
+  lines.forEach((line) => {
+    const match = line.match(/^Tab:\s*(.+)$/i);
+    if (match) {
+      if (current) tabs.push(current);
+      current = { label: match[1].trim(), content: '' };
+      return;
+    }
+    if (!current) {
+      current = { label: 'Overview', content: '' };
+    }
+    current.content += `${line}\n`;
+  });
+
+  if (current) tabs.push(current);
+  return tabs.map((tab) => ({ ...tab, content: tab.content.trim() })).filter((tab) => tab.content);
+};
+
+const MarkdownBody = ({ content }: { content: string }) => (
+  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+    {content}
+  </ReactMarkdown>
+);
+
+const TabsBlockView = ({ raw }: { raw: string }) => {
+  const tabs = useMemo(() => parseTabsBlock(raw), [raw]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const active = tabs[activeIndex] || tabs[0];
+
+  if (!tabs.length || !active) {
+    return (
+      <pre className="whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
+        {raw}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] px-3 py-2">
+        {tabs.map((tab, index) => (
+          <button
+            key={`${tab.label}-${index}`}
+            type="button"
+            onClick={() => setActiveIndex(index)}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+              index === activeIndex
+                ? 'bg-[var(--foreground)] text-[var(--background)]'
+                : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="p-3 text-sm">
+        <MarkdownBody content={active.content} />
+      </div>
+    </div>
+  );
+};
+
+const SliderBlockView = ({ raw }: { raw: string }) => {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const getValue = (key: string) => {
+    const match = lines.find((line) => line.toLowerCase().startsWith(`${key}:`));
+    return match ? match.split(':').slice(1).join(':').trim() : '';
+  };
+  const label = getValue('label') || 'Signal';
+  const valueText = getValue('value') || '5/10';
+  const left = getValue('left') || 'Low';
+  const right = getValue('right') || 'High';
+
+  const numericMatch = valueText.match(/(\d+(?:\.\d+)?)/);
+  const numericValue = numericMatch ? Number(numericMatch[1]) : 5;
+  const maxValue = valueText.includes('/')
+    ? Number(valueText.split('/')[1]) || 10
+    : 10;
+  const percent = Math.min(100, Math.max(0, (numericValue / maxValue) * 100));
+
+  return (
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+      <div className="flex items-center justify-between text-xs uppercase tracking-widest text-[var(--muted)]">
+        <span>{label}</span>
+        <span>{valueText}</span>
+      </div>
+      <div className="mt-2 h-2 w-full rounded-full bg-[var(--surface-strong)]">
+        <div
+          className="h-2 rounded-full bg-[var(--foreground)]"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-[var(--muted)]">
+        <span>{left}</span>
+        <span>{right}</span>
+      </div>
+    </div>
+  );
+};
+
+const RichMarkdown = ({ content }: { content: string }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      table: ({ children }) => (
+        <div className="my-3 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">{children}</table>
+        </div>
+      ),
+      th: ({ children }) => (
+        <th className="border-b border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-left text-[11px] uppercase tracking-widest text-[var(--muted)]">
+          {children}
+        </th>
+      ),
+      td: ({ children }) => (
+        <td className="border-b border-[var(--border)] px-3 py-2 text-[var(--foreground)]">
+          {children}
+        </td>
+      ),
+      code: ({ className, children }) => {
+        const language = /language-(\w+)/.exec(className || '')?.[1];
+        const raw = String(children).trim();
+        const isInline = !className;
+
+        if (!isInline && language === 'tabs') {
+          return <TabsBlockView raw={raw} />;
+        }
+
+        if (!isInline && language === 'slider') {
+          return <SliderBlockView raw={raw} />;
+        }
+
+        if (!isInline && language === 'diagram') {
+          return (
+            <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
+              {raw}
+            </pre>
+          );
+        }
+
+        if (isInline) {
+          return (
+            <code className="rounded bg-[var(--surface-strong)] px-1.5 py-0.5 text-xs text-[var(--foreground)]">
+              {children}
+            </code>
+          );
+        }
+
+        return (
+          <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
+            {raw}
+          </pre>
+        );
+      },
+    }}
+  >
+    {content}
+  </ReactMarkdown>
+);
 
 export default function HomeView() {
   const router = useRouter();
@@ -30,22 +198,23 @@ export default function HomeView() {
   const [isMicMuted, setIsMicMuted] = useState(true);
   const [readSuggestions, setReadSuggestions] = useState<string[]>([]);
   const [activeNarrationKey, setActiveNarrationKey] = useState<string | null>(null);
+  const [isHistoryNarrationLoading, setIsHistoryNarrationLoading] = useState(false);
   const { status } = useSession();
   const [authCheckAuthenticated, setAuthCheckAuthenticated] = useState(false);
   const isSessionAuthenticated = status === 'authenticated';
   const isAuthenticated = isSessionAuthenticated || authCheckAuthenticated;
   const [userId, setUserId] = useState<number | null>(null);
   const [settings, setSettings] = useState<Settings>({
-    narrationTime: 5,
     narrationType: 'Realistic',
-    voiceType: VoiceName.ZEPHYR,
+    voiceType: DEFAULT_GOOGLE_VOICE,
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
-    ttsProvider: TextToSpeechProvider.ELEVENLABS,
+    ttsProvider: TextToSpeechProvider.GOOGLE,
     aiModel: AIModel.AUTO,
-    enableBackgroundMusic: true,
+    enableBackgroundMusic: false,
     backgroundMusicVolume: 0.15,
   });
+  const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
   const [lastAutoModel, setLastAutoModel] = useState<AIModel | null>(null);
   const [latestResponseModel, setLatestResponseModel] = useState<AIModel | null>(null);
   const [userProfile, setUserProfile] = useState<{
@@ -56,10 +225,19 @@ export default function HomeView() {
     pulse?: string;
     bio?: string;
   } | null>(null);
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [completedTypewriterMap, setCompletedTypewriterMap] = useState<Record<string, boolean>>({});
+  const [typewriterState, setTypewriterState] = useState<{ messageId: string | null; text: string }>({ messageId: null, text: '' });
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const readScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const userMessageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const pendingScrollUserIdRef = useRef<string | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const typewriterFrameRef = useRef<number | null>(null);
+  const activeTypewriterMessageRef = useRef<string | null>(null);
   const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const TYPEWRITER_CHARS_PER_SECOND = 140;
   const getHistoryStorageKey = (id: number | null) =>
     id ? `narrative_history_${id}` : 'narrative_history_guest';
 
@@ -125,6 +303,7 @@ export default function HomeView() {
   const activeListenSessionIdRef = useRef<string | null>(null);
   const activeReadSessionIdRef = useRef<string | null>(null);
   const handleListenTranscriptRef = useRef<(transcript: string) => void>(() => {});
+  const userMessages = useMemo(() => messages.filter((msg) => msg.role === 'user'), [messages]);
 
   const startRecognition = (continuous: boolean) => {
     if (!recognitionRef.current) return;
@@ -247,24 +426,38 @@ export default function HomeView() {
           });
           const settingsData = await settingsRes.json();
           if (settingsData.success && settingsData.settings) {
+            const storedProvider = settingsData.settings.ttsProvider as TextToSpeechProvider | undefined;
+            const resolvedProvider = storedProvider === TextToSpeechProvider.OPENAI
+              ? TextToSpeechProvider.GOOGLE
+              : Object.values(TextToSpeechProvider).includes(storedProvider as TextToSpeechProvider)
+                ? (storedProvider as TextToSpeechProvider)
+                : TextToSpeechProvider.GOOGLE;
             setSettings((prev) => ({
               ...prev,
               aiModel:
                 settingsData.settings.aiModel === AIModel.OPENAI ||
                 settingsData.settings.aiModel === AIModel.CLAUDE_SONNET ||
+                settingsData.settings.aiModel === AIModel.GEMINI ||
                 settingsData.settings.aiModel === AIModel.XAI ||
                 settingsData.settings.aiModel === AIModel.AUTO
                   ? settingsData.settings.aiModel
                   : AIModel.AUTO,
-              narrationTime: settingsData.settings.narrationTime || 5,
               narrationType: settingsData.settings.narrationType || 'Realistic',
-              voiceType: settingsData.settings.voiceType || VoiceName.ZEPHYR,
+              voiceType: settingsData.settings.voiceType || DEFAULT_GOOGLE_VOICE,
               voiceGender: settingsData.settings.voiceGender || VoiceGender.AUTO,
               language: settingsData.settings.language || Language.ENGLISH,
-              ttsProvider: settingsData.settings.ttsProvider || TextToSpeechProvider.ELEVENLABS,
-              enableBackgroundMusic: settingsData.settings.enableBackgroundMusic !== undefined ? settingsData.settings.enableBackgroundMusic : true,
+              ttsProvider: resolvedProvider,
+              enableBackgroundMusic: settingsData.settings.enableBackgroundMusic !== undefined ? settingsData.settings.enableBackgroundMusic : false,
               backgroundMusicVolume: settingsData.settings.backgroundMusicVolume || 0.15,
             }));
+
+            if (storedProvider === TextToSpeechProvider.OPENAI) {
+              fetch('/api/chronoread/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ttsProvider: TextToSpeechProvider.GOOGLE }),
+              }).catch((error) => console.error('Error updating TTS provider default:', error));
+            }
           }
 
           const profileRes = await fetch('/api/chronoread/profile', {
@@ -333,15 +526,35 @@ export default function HomeView() {
   }, [interactionMode]);
 
   useEffect(() => {
-    const availableVoices = getVoicesForLanguageAndGender(settings.language, settings.voiceGender);
-    if (availableVoices.length === 0) return;
-    if (!availableVoices.includes(settings.voiceType)) {
+    let isActive = true;
+    listGoogleVoices(settings.language)
+      .then((voices) => {
+        if (!isActive) return;
+        setGoogleVoices(voices);
+      })
+      .catch(() => {});
+
+    return () => {
+      isActive = false;
+    };
+  }, [settings.language]);
+
+  const availableGoogleVoices = useMemo(
+    () => filterVoicesByGender(googleVoices, settings.voiceGender),
+    [googleVoices, settings.voiceGender]
+  );
+
+  useEffect(() => {
+    if (!googleVoices.length) return;
+    const candidates = availableGoogleVoices.length ? availableGoogleVoices : googleVoices;
+    const nextVoice = candidates[0]?.name || DEFAULT_GOOGLE_VOICE;
+    if (nextVoice && settings.voiceType !== nextVoice) {
       setSettings((prev) => ({
         ...prev,
-        voiceType: availableVoices[0],
+        voiceType: nextVoice,
       }));
     }
-  }, [settings.language, settings.voiceGender, settings.voiceType]);
+  }, [googleVoices, availableGoogleVoices, settings.voiceType]);
 
   useEffect(() => {
     setRecognitionLanguage();
@@ -351,7 +564,7 @@ export default function HomeView() {
     }
   }, [settings.language]);
 
-  const setRecognitionLanguage = () => {
+  const setRecognitionLanguageFor = (language: Language) => {
     const langMap: Record<Language, string> = {
       [Language.ENGLISH]: 'en-US',
       [Language.SPANISH]: 'es-ES',
@@ -370,7 +583,11 @@ export default function HomeView() {
       [Language.GUJARATI]: 'gu-IN',
       [Language.PUNJABI]: 'pa-IN',
     };
-    if (recognitionRef.current) recognitionRef.current.lang = langMap[settings.language] || 'en-US';
+    if (recognitionRef.current) recognitionRef.current.lang = langMap[language] || 'en-US';
+  };
+
+  const setRecognitionLanguage = () => {
+    setRecognitionLanguageFor(settings.language);
   };
 
   const toggleMic = () => {
@@ -402,6 +619,13 @@ export default function HomeView() {
     setMicMuted(false);
     setRecognitionLanguage();
     startRecognition(false);
+  };
+
+  const enterListenMode = () => {
+    stopNarrationForUiChange();
+    resetListenSession();
+    setMicMuted(false);
+    setInteractionMode("listen");
   };
 
   const initAudio = () => {
@@ -471,12 +695,54 @@ export default function HomeView() {
     return Math.sqrt(sum / data.length);
   };
 
-  const getTtsExcerpt = (text: string, mode: "read" | "listen") => {
-    const wordsPerMinute = mode === "listen" ? 150 : 130;
-    const maxWords = Math.max(120, settings.narrationTime * wordsPerMinute);
-    const words = text.trim().split(/\s+/).filter(Boolean);
-    if (words.length <= maxWords) return text;
-    return words.slice(0, maxWords).join(' ');
+  const inferLanguageFromTranscript = (text: string): Language | null => {
+    if (!text) return null;
+    if (/[\u0B80-\u0BFF]/.test(text)) return Language.TAMIL;
+    return null;
+  };
+
+  const cleanTextForTts = (raw: string) => {
+    if (!raw) return '';
+    let text = raw;
+    text = text.replace(/```[\s\S]*?```/g, ' ');
+    text = text.replace(/`([^`]+)`/g, '$1');
+    text = text.replace(/\[(.*?)\]\((.*?)\)/g, '$1');
+    text = text.replace(/^\s*#{1,6}\s+/gm, '');
+    text = text.replace(/^\s*[-*+]\s+/gm, '');
+    text = text.replace(/^\s*\d+[.)]\s+/gm, '');
+    text = text.replace(/[\*_~]/g, '');
+
+    const lines = text.split(/\r?\n/).filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      const pipeCount = (trimmed.match(/\|/g) || []).length;
+      if (pipeCount >= 2) return false;
+      if (/^[-:| ]+$/.test(trimmed)) return false;
+      return true;
+    });
+    text = lines.join(' ');
+
+    text = text.replace(/[\p{Extended_Pictographic}]/gu, '');
+    text = text.replace(/[^\p{L}\p{N}\s.,;:!?"'()\-]/gu, ' ');
+    text = text.replace(/\s+/g, ' ').trim();
+    return text;
+  };
+
+  const getTtsExcerpt = (text: string, _mode: "read" | "listen") => {
+    const cleaned = cleanTextForTts(text);
+    return cleaned || text;
+  };
+
+  const getNarrationStyleRate = (style: Settings["narrationType"]) => {
+    if (style === "Dramatic") return 0.95;
+    if (style === "Educational") return 0.98;
+    return 1.0;
+  };
+
+  const getNarrationStylePitch = (style: Settings["narrationType"]) => {
+    if (style === "Dramatic") return -2;
+    if (style === "Educational") return 0;
+    return -1;
   };
 
   const dedupeHistory = (items: HistoryItem[]) => {
@@ -542,9 +808,206 @@ export default function HomeView() {
     }
   };
 
+  const resetMessageUiState = useCallback(() => {
+    if (typewriterFrameRef.current) {
+      window.cancelAnimationFrame(typewriterFrameRef.current);
+      typewriterFrameRef.current = null;
+    }
+    setTypewriterState({ messageId: null, text: '' });
+    setCompletedTypewriterMap({});
+    userMessageRefs.current = {};
+    pendingScrollUserIdRef.current = null;
+    activeRequestIdRef.current = null;
+    activeTypewriterMessageRef.current = null;
+    setActiveRequestId(null);
+  }, []);
+
+  const markAssistantMessageCompleted = useCallback((id: string) => {
+    setCompletedTypewriterMap((prev) => {
+      if (prev[id]) return prev;
+      return { ...prev, [id]: true };
+    });
+  }, []);
+
+  const scrollToMessage = useCallback((id: string) => {
+    const node = userMessageRefs.current[id];
+    if (!node) {
+      pendingScrollUserIdRef.current = id;
+      return;
+    }
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    activeRequestIdRef.current = id;
+    setActiveRequestId(id);
+  }, []);
+
+  const registerUserMessageNode = (id: string, node: HTMLDivElement | null) => {
+    if (node) {
+      userMessageRefs.current[id] = node;
+      if (pendingScrollUserIdRef.current === id) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        pendingScrollUserIdRef.current = null;
+        activeRequestIdRef.current = id;
+        setActiveRequestId(id);
+      }
+      return;
+    }
+    delete userMessageRefs.current[id];
+  };
+
+  const startTypewriter = useCallback((message: ChatMessage) => {
+    if (!message.animate) {
+      markAssistantMessageCompleted(message.id);
+      return;
+    }
+
+    if (typewriterFrameRef.current) {
+      window.cancelAnimationFrame(typewriterFrameRef.current);
+      typewriterFrameRef.current = null;
+    }
+
+    activeTypewriterMessageRef.current = message.id;
+    setTypewriterState({ messageId: message.id, text: '' });
+    const fullText = message.content;
+    if (!fullText.length) {
+      markAssistantMessageCompleted(message.id);
+      activeTypewriterMessageRef.current = null;
+      setTypewriterState({ messageId: null, text: '' });
+      return;
+    }
+
+    const msPerChar = 1000 / TYPEWRITER_CHARS_PER_SECOND;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      if (activeTypewriterMessageRef.current !== message.id) return;
+
+      const elapsed = now - start;
+      const nextIndex = Math.min(fullText.length, Math.max(1, Math.floor(elapsed / msPerChar)));
+      setTypewriterState({ messageId: message.id, text: fullText.slice(0, nextIndex) });
+
+      if (nextIndex < fullText.length) {
+        typewriterFrameRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
+
+      markAssistantMessageCompleted(message.id);
+      activeTypewriterMessageRef.current = null;
+      typewriterFrameRef.current = null;
+      setTypewriterState({ messageId: null, text: '' });
+    };
+
+    typewriterFrameRef.current = window.requestAnimationFrame(tick);
+  }, [markAssistantMessageCompleted]);
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    return () => {
+      if (typewriterFrameRef.current) {
+        window.cancelAnimationFrame(typewriterFrameRef.current);
+        typewriterFrameRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!messages.length) return;
+    setCompletedTypewriterMap((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      messages.forEach((msg) => {
+        if (msg.role === 'assistant' && (!msg.animate || interactionMode !== 'read')) {
+          if (!next[msg.id]) {
+            next[msg.id] = true;
+            changed = true;
+          }
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [messages, interactionMode]);
+
+  useEffect(() => {
+    if (interactionMode !== 'read') return;
+    const nextMessage = [...messages]
+      .reverse()
+      .find((msg) => msg.role === 'assistant' && msg.animate && !completedTypewriterMap[msg.id]);
+    if (!nextMessage) return;
+    if (activeTypewriterMessageRef.current === nextMessage.id) return;
+    startTypewriter(nextMessage);
+  }, [messages, interactionMode, completedTypewriterMap, startTypewriter]);
+
+  useEffect(() => {
+    if (interactionMode === 'read') return;
+    if (typewriterFrameRef.current) {
+      window.cancelAnimationFrame(typewriterFrameRef.current);
+      typewriterFrameRef.current = null;
+    }
+    if (activeTypewriterMessageRef.current) {
+      markAssistantMessageCompleted(activeTypewriterMessageRef.current);
+    }
+    activeTypewriterMessageRef.current = null;
+    setTypewriterState({ messageId: null, text: '' });
+  }, [interactionMode, markAssistantMessageCompleted]);
+
+  useEffect(() => {
+    if (interactionMode !== 'read') return;
+    if (!messages.length) {
+      activeRequestIdRef.current = null;
+      setActiveRequestId(null);
+      return;
+    }
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage.role !== 'user') return;
+    scrollToMessage(lastMessage.id);
+  }, [messages, interactionMode, scrollToMessage]);
+
+  useEffect(() => {
+    if (interactionMode !== 'read') return;
+    const container = readScrollContainerRef.current;
+    if (!container || userMessages.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible.length > 0) {
+          const nextId = visible[0].target.getAttribute('data-message-id');
+          if (nextId && nextId !== activeRequestIdRef.current) {
+            activeRequestIdRef.current = nextId;
+            setActiveRequestId(nextId);
+          }
+          return;
+        }
+
+        const fallback = entries
+          .map((entry) => {
+            const id = entry.target.getAttribute('data-message-id');
+            if (!id) return null;
+            const distance = Math.abs(
+              entry.boundingClientRect.top -
+                (container.getBoundingClientRect().top + container.clientHeight * 0.25)
+            );
+            return { id, distance };
+          })
+          .filter(Boolean) as { id: string; distance: number }[];
+        if (!fallback.length) return;
+        fallback.sort((a, b) => a.distance - b.distance);
+        const nextId = fallback[0].id;
+        if (nextId && nextId !== activeRequestIdRef.current) {
+          activeRequestIdRef.current = nextId;
+          setActiveRequestId(nextId);
+        }
+      },
+      { root: container, threshold: [0.25, 0.5, 0.75] }
+    );
+
+    userMessages.forEach((msg) => {
+      const node = userMessageRefs.current[msg.id];
+      if (node) observer.observe(node);
+    });
+
+    return () => observer.disconnect();
+  }, [userMessages, interactionMode]);
 
   useEffect(() => {
     const tick = () => {
@@ -679,7 +1142,7 @@ export default function HomeView() {
   const playTtsInChunks = async (
     text: string,
     voiceProfile?: VoiceProfile,
-    options?: { listenMode?: boolean; genre?: string | null }
+    options?: { listenMode?: boolean; genre?: string | null; onStart?: () => void; onFinish?: () => void }
   ): Promise<'completed' | 'canceled' | 'failed' | 'timeout'> => {
     const chunks = splitTextForTts(text, 600);
     const sessionId = Math.random().toString(36).slice(2, 10);
@@ -717,10 +1180,13 @@ export default function HomeView() {
           throw error;
         }
         if (!audioBase64) throw new Error('Empty TTS audio chunk');
-        if (!hasStartedNarration && options?.listenMode) {
+        if (!hasStartedNarration) {
           hasStartedNarration = true;
-          setListenStatus('narrating');
-          startAmbientMusic(options.genre || null);
+          options?.onStart?.();
+          if (options?.listenMode) {
+            setListenStatus('narrating');
+            startAmbientMusic(options.genre || null);
+          }
         }
         await playAudioChunk(audioBase64);
       }
@@ -734,6 +1200,7 @@ export default function HomeView() {
       isNarratingRef.current = false;
       setIsNarrating(false);
       stopAmbientMusic();
+      options?.onFinish?.();
       if (options?.listenMode) {
         setListenStatus(isMicMutedRef.current ? 'idle' : 'listening');
       }
@@ -743,7 +1210,7 @@ export default function HomeView() {
   };
 
   /**
-   * Generate speech using the configured TTS provider (OpenAI or ElevenLabs)
+   * Generate speech using the configured TTS provider (Google, OpenAI, or ElevenLabs)
    */
   const toVoiceNarrationType = (
     profile: VoiceProfile | undefined,
@@ -756,20 +1223,48 @@ export default function HomeView() {
   };
 
   const getTtsProviderOrder = (provider: TextToSpeechProvider) => {
+    if (provider === TextToSpeechProvider.GOOGLE) {
+      return [TextToSpeechProvider.GOOGLE, TextToSpeechProvider.ELEVENLABS];
+    }
     if (provider === TextToSpeechProvider.ELEVENLABS) {
-      return [TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.OPENAI];
+      return [TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.GOOGLE];
     }
     if (provider === TextToSpeechProvider.OPENAI) {
-      return [TextToSpeechProvider.OPENAI, TextToSpeechProvider.ELEVENLABS];
+      return [TextToSpeechProvider.OPENAI];
     }
-    return [];
+    return [TextToSpeechProvider.GOOGLE, TextToSpeechProvider.ELEVENLABS];
   };
 
   const generateNarrationAudio = async (text: string, voiceProfile?: VoiceProfile): Promise<string> => {
     const effectiveNarrationType = toVoiceNarrationType(voiceProfile, settings.narrationType);
     const providerOrder = getTtsProviderOrder(settings.ttsProvider);
+    const googleLanguageCode = getGoogleLanguageCode(settings.language);
+    const baseRate = getNarrationStyleRate(effectiveNarrationType);
+    const paceMultiplier = voiceProfile?.pace === 'fast' ? 1.12 : voiceProfile?.pace === 'slow' ? 0.92 : 1.0;
+    const slangMultiplier = voiceProfile?.slang === 'moderate' ? 1.04 : voiceProfile?.slang === 'light' ? 1.02 : 1.0;
+    const paceRate = Math.max(0.7, Math.min(1.3, baseRate * paceMultiplier * slangMultiplier));
+    const basePitch = getNarrationStylePitch(effectiveNarrationType);
+    const profilePitch = voiceProfile?.pitch === 'high' ? 2 : voiceProfile?.pitch === 'low' ? -4 : 0;
+    const pitchValue = Math.max(-8, Math.min(8, basePitch + profilePitch));
+    const resolvedGoogleVoice = resolveGoogleVoice(googleVoices, settings.voiceType, settings.voiceGender);
+    const googleVoiceName = resolvedGoogleVoice?.name || settings.voiceType || DEFAULT_GOOGLE_VOICE;
 
     for (const provider of providerOrder) {
+      if (provider === TextToSpeechProvider.GOOGLE) {
+        try {
+          const googleAudio = await generateSpeechWithGoogle(
+            text,
+            googleVoiceName,
+            googleLanguageCode,
+            paceRate,
+            pitchValue
+          );
+          if (googleAudio) return googleAudio;
+        } catch (error) {
+          console.warn('Google TTS failed:', error);
+        }
+      }
+
       if (provider === TextToSpeechProvider.ELEVENLABS) {
         try {
           const elevenLabsAudio = await generateSpeechWithElevenLabs(
@@ -798,7 +1293,10 @@ export default function HomeView() {
     return '';
   };
 
-  const playBrowserTTS = (text: string, options?: { listenMode?: boolean; genre?: string | null; onComplete?: () => void }) => {
+  const playBrowserTTS = (
+    text: string,
+    options?: { listenMode?: boolean; genre?: string | null; onComplete?: () => void; voiceProfile?: VoiceProfile }
+  ) => {
     if (!('speechSynthesis' in window)) {
       throw new Error('Browser speech synthesis is not supported on this device.');
     }
@@ -830,6 +1328,15 @@ export default function HomeView() {
       ARABIC: 'ar-SA',
       HEBREW: 'he-IL',
     };
+
+    const effectiveNarrationType = toVoiceNarrationType(options?.voiceProfile, settings.narrationType);
+    const baseRate = getNarrationStyleRate(effectiveNarrationType);
+    const paceMultiplier = options?.voiceProfile?.pace === 'fast' ? 1.12 : options?.voiceProfile?.pace === 'slow' ? 0.92 : 1.0;
+    const slangMultiplier = options?.voiceProfile?.slang === 'moderate' ? 1.04 : options?.voiceProfile?.slang === 'light' ? 1.02 : 1.0;
+    const computedRate = Math.max(0.7, Math.min(1.3, baseRate * paceMultiplier * slangMultiplier));
+    const basePitch = getNarrationStylePitch(effectiveNarrationType);
+    const profilePitch = options?.voiceProfile?.pitch === 'high' ? 0.15 : options?.voiceProfile?.pitch === 'low' ? -0.15 : 0;
+    const computedPitch = Math.max(0.6, Math.min(1.4, 1 + (basePitch + profilePitch) / 10));
 
     const chunks = splitTextForTts(text, 1200);
     const lang = languageMap[settings.language] || 'en-US';
@@ -872,8 +1379,8 @@ export default function HomeView() {
 
       const utterance = new SpeechSynthesisUtterance(chunks[chunkIndex]);
       utterance.lang = lang;
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
+      utterance.rate = computedRate;
+      utterance.pitch = computedPitch;
       utterance.volume = 0.9;
       if (voice) {
         utterance.voice = voice;
@@ -1005,6 +1512,26 @@ export default function HomeView() {
       .replace(/\r\n/g, '\n');
 
     return withoutMetadata.trim();
+  };
+
+  const getAssistantDisplayContent = (msg: ChatMessage) => {
+    if (msg.role !== 'assistant') return msg.content;
+    if (!msg.animate) return msg.content;
+    if (completedTypewriterMap[msg.id]) return msg.content;
+    if (typewriterState.messageId === msg.id) return typewriterState.text;
+    return msg.content;
+  };
+
+  const buildSuggestionFallback = (query: string) => {
+    const base = query.trim();
+    if (!base) {
+      return ['Key takeaways', 'Real-world example', 'What to do next'];
+    }
+    return [
+      `Key takeaways from ${base}`,
+      `Real-world angle on ${base}`,
+      `Next steps for ${base}`,
+    ];
   };
 
   const extractSuggestionsFromText = (text: string) => {
@@ -1237,6 +1764,7 @@ export default function HomeView() {
       }
 
       const { cleanedText, suggestions } = parseResponseMetadata(narrativeResponse.narration);
+      const baseSuggestions = suggestions.slice(0, 3);
       
       const audioBase64 = '';
 
@@ -1247,6 +1775,7 @@ export default function HomeView() {
         timestamp: new Date(),
         audioBlob: undefined,
         modelUsed: resolvedModel || undefined,
+        animate: interactionModeRef.current === "read",
       };
 
       setMessages(prev => [...prev, assistantMsg]);
@@ -1254,8 +1783,8 @@ export default function HomeView() {
       const updatedHistoryItem: HistoryItem = {
         ...pendingHistoryItem,
         response: cleanedText,
-        suggestions,
-        suggestion: suggestions[0],
+        suggestions: baseSuggestions,
+        suggestion: baseSuggestions[0],
         modelUsed: resolvedModel || pendingHistoryItem.modelUsed,
         conversation: [
           ...(pendingHistoryItem.conversation || []),
@@ -1282,7 +1811,26 @@ export default function HomeView() {
         }).catch((error) => console.error('Error saving assistant message:', error));
       }
 
-      setReadSuggestions(suggestions);
+      setReadSuggestions(baseSuggestions);
+
+      void (async () => {
+        const generatedSuggestions = await generateSuggestions(userQuery, settings.language, chatHistory);
+        const fallbackSuggestions = buildSuggestionFallback(userQuery);
+        const mergedSuggestions = [...baseSuggestions, ...generatedSuggestions, ...fallbackSuggestions]
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .filter((value, index, list) => list.indexOf(value) === index)
+          .slice(0, 3);
+
+        if (mergedSuggestions.length > 0) {
+          setReadSuggestions(mergedSuggestions);
+          upsertHistoryItem({
+            ...updatedHistoryItem,
+            suggestions: mergedSuggestions,
+            suggestion: mergedSuggestions[0],
+          });
+        }
+      })();
 
     } catch (error) {
       console.error(error);
@@ -1291,6 +1839,7 @@ export default function HomeView() {
         role: 'assistant',
         content: "I'm sorry, I encountered an error while processing your narrative request.",
         timestamp: new Date(),
+        animate: interactionModeRef.current === "read",
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
@@ -1305,6 +1854,8 @@ export default function HomeView() {
 
   const getModelLabel = (model: AIModel) => {
     switch (model) {
+      case AIModel.GEMINI:
+        return 'Gemini';
       case AIModel.CLAUDE_SONNET:
         return 'Claude Sonnet';
       case AIModel.XAI:
@@ -1328,6 +1879,7 @@ export default function HomeView() {
     const normalized = value.toLowerCase();
     if (normalized === AIModel.OPENAI) return AIModel.OPENAI;
     if (normalized === AIModel.CLAUDE_SONNET) return AIModel.CLAUDE_SONNET;
+    if (normalized === AIModel.GEMINI) return AIModel.GEMINI;
     if (normalized === AIModel.XAI) return AIModel.XAI;
     return null;
   };
@@ -1336,6 +1888,15 @@ export default function HomeView() {
     if (!transcript.trim() || isLoading) return;
 
     initAudio();
+    const inferredLanguage = inferLanguageFromTranscript(transcript);
+    const effectiveLanguage = inferredLanguage || settings.language;
+    if (inferredLanguage && inferredLanguage !== settings.language) {
+      setSettings((prev) => ({
+        ...prev,
+        language: inferredLanguage,
+      }));
+      setRecognitionLanguageFor(inferredLanguage);
+    }
     const resolvedMode = resolveSearchMode(transcript, searchMode);
     if (resolvedMode !== searchMode) {
       setSearchMode(resolvedMode);
@@ -1396,7 +1957,7 @@ export default function HomeView() {
       const narrativeResponse = await generateNarrative(
         transcript,
         currentMode,
-        settings,
+        { ...settings, language: effectiveLanguage },
         existingConversation.slice(-6).map((entry) => ({ role: entry.role, content: entry.content })),
         "listen",
         {
@@ -1422,7 +1983,7 @@ export default function HomeView() {
       const startListenNarration = async () => {
         if (settings.ttsProvider === TextToSpeechProvider.OPEN_SOURCE) {
           try {
-            playBrowserTTS(excerpt, { listenMode: true, genre: genre || null });
+            playBrowserTTS(excerpt, { listenMode: true, genre: genre || null, voiceProfile });
           } catch (fallbackError) {
             console.error('Browser TTS failed:', fallbackError);
           }
@@ -1436,7 +1997,7 @@ export default function HomeView() {
         }
         if (playStatus === 'failed') {
           try {
-            playBrowserTTS(excerpt, { listenMode: true, genre: genre || null });
+            playBrowserTTS(excerpt, { listenMode: true, genre: genre || null, voiceProfile });
           } catch (fallbackError) {
             console.error('Browser TTS fallback failed:', fallbackError);
             setMessages(prev => [...prev, {
@@ -1445,6 +2006,7 @@ export default function HomeView() {
               content: 'Audio narration failed. The text response is shown below.',
               timestamp: new Date(),
               mode: currentMode,
+              animate: interactionModeRef.current === "read",
             }]);
             setListenStatus(isMicMutedRef.current ? "idle" : "listening");
           }
@@ -1537,6 +2099,8 @@ export default function HomeView() {
     handleStopNarration();
     activeNarrationKeyRef.current = entryKey;
     setActiveNarrationKey(entryKey);
+    setIsHistoryNarrationLoading(true);
+    setListenStatus('thinking');
     const excerpt = getTtsExcerpt(entry.content, "listen");
     if (settings.ttsProvider === TextToSpeechProvider.OPEN_SOURCE) {
       try {
@@ -1546,20 +2110,39 @@ export default function HomeView() {
               activeNarrationKeyRef.current = null;
               setActiveNarrationKey(null);
             }
+            setIsHistoryNarrationLoading(false);
+            setListenStatus('idle');
           },
+          voiceProfile,
         });
       } catch (fallbackError) {
         console.error('Browser TTS failed:', fallbackError);
+        setIsHistoryNarrationLoading(false);
+        setListenStatus('idle');
       }
+      setIsHistoryNarrationLoading(false);
+      setListenStatus('narrating');
       return;
     }
 
-    const playStatus = await playTtsInChunks(excerpt, voiceProfile, { listenMode: false });
+    const playStatus = await playTtsInChunks(excerpt, voiceProfile, {
+      listenMode: false,
+      onStart: () => {
+        setIsHistoryNarrationLoading(false);
+        setListenStatus('narrating');
+      },
+      onFinish: () => {
+        setIsHistoryNarrationLoading(false);
+        setListenStatus('idle');
+      },
+    });
     if (playStatus === 'timeout') {
       if (activeNarrationKeyRef.current === entryKey) {
         activeNarrationKeyRef.current = null;
         setActiveNarrationKey(null);
       }
+      setIsHistoryNarrationLoading(false);
+      setListenStatus('idle');
       return;
     }
     if (playStatus === 'failed') {
@@ -1570,10 +2153,15 @@ export default function HomeView() {
               activeNarrationKeyRef.current = null;
               setActiveNarrationKey(null);
             }
+            setIsHistoryNarrationLoading(false);
+            setListenStatus('idle');
           },
+          voiceProfile,
         });
       } catch (fallbackError) {
         console.error('Browser TTS fallback failed:', fallbackError);
+        setIsHistoryNarrationLoading(false);
+        setListenStatus('idle');
       }
       return;
     }
@@ -1582,6 +2170,8 @@ export default function HomeView() {
       activeNarrationKeyRef.current = null;
       setActiveNarrationKey(null);
     }
+    setIsHistoryNarrationLoading(false);
+    setListenStatus('idle');
   };
 
   const closeListenModal = () => {
@@ -1606,8 +2196,10 @@ export default function HomeView() {
       content: entry.content,
       timestamp: entry.timestamp,
       mode: item.mode,
+      animate: false,
     }));
 
+    resetMessageUiState();
     setMessages(mappedMessages);
     setInteractionMode("read");
     setSearchMode(item.mode);
@@ -1617,6 +2209,14 @@ export default function HomeView() {
     }
     setReadSuggestions(item.suggestions || (item.suggestion ? [item.suggestion] : []));
     setInputValue('');
+    const lastUser = [...mappedMessages].reverse().find((entry) => entry.role === 'user');
+    if (lastUser) {
+      activeRequestIdRef.current = lastUser.id;
+      setActiveRequestId(lastUser.id);
+    } else {
+      activeRequestIdRef.current = null;
+      setActiveRequestId(null);
+    }
   };
 
   useEffect(() => {
@@ -1633,6 +2233,8 @@ export default function HomeView() {
     }
     return fallback;
   };
+
+  const isListenBusy = listenStatus === "thinking" || isNarrating;
 
   if (status === 'loading') {
     return (
@@ -1906,7 +2508,7 @@ export default function HomeView() {
         )}
 
         {interactionMode === "read" ? (
-          <div className="flex-1 overflow-y-auto px-3 md:px-0 scroll-smooth pb-28 md:pb-10">
+          <div className="flex-1 overflow-y-auto px-3 md:px-0 scroll-smooth pb-28 md:pb-10" ref={readScrollContainerRef}>
             <div className="max-w-3xl mx-auto py-8 md:py-10 space-y-8">
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
@@ -1926,23 +2528,29 @@ export default function HomeView() {
                 </div>
               )}
 
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[92%] md:max-w-[85%] space-y-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`p-3.5 md:p-4 rounded-2xl text-sm md:text-[15px] leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)]'
-                        : 'bg-transparent text-[var(--foreground)] whitespace-pre-line'
-                    }`}>
-                      {msg.role === 'assistant' ? (
-                        <div className="prose prose-sm max-w-none dark:prose-invert">
-                          <ReactMarkdown>
-                            {sanitizeNarrationForDisplay(msg.content)}
-                          </ReactMarkdown>
-                        </div>
-                      ) : (
-                        msg.content
-                      )}
+              {messages.map((msg) => {
+                const isUser = msg.role === 'user';
+                const displayContent = isUser ? msg.content : getAssistantDisplayContent(msg);
+                return (
+                  <div
+                    key={msg.id}
+                    ref={isUser ? (node) => registerUserMessageNode(msg.id, node) : undefined}
+                    data-message-id={isUser ? msg.id : undefined}
+                    className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className={`max-w-[92%] md:max-w-[85%] space-y-2 ${isUser ? 'items-end' : 'items-start'}`}>
+                      <div className={`p-3.5 md:p-4 rounded-2xl text-sm md:text-[15px] leading-relaxed ${
+                        isUser
+                          ? 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)]'
+                          : 'bg-transparent text-[var(--foreground)] whitespace-pre-line'
+                      }`}>
+                        {msg.role === 'assistant' ? (
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <RichMarkdown content={sanitizeNarrationForDisplay(displayContent)} />
+                          </div>
+                        ) : (
+                          displayContent
+                        )}
                       {msg.audioBlob && (
                         <button 
                           onClick={() => handlePlayAudio(msg.audioBlob!)}
@@ -1964,9 +2572,10 @@ export default function HomeView() {
                         </>
                       )}
                     </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {isLoading && (
                 <div className="flex justify-start">
                   <div className="bg-[var(--surface)] border border-[var(--border)] p-4 rounded-2xl animate-pulse">
@@ -1995,7 +2604,6 @@ export default function HomeView() {
                   </div>
                 </div>
               )}
-              <div ref={chatEndRef} />
             </div>
           </div>
         ) : (
@@ -2044,64 +2652,87 @@ export default function HomeView() {
           </div>
         )}
 
+        {interactionMode === "read" && userMessages.length > 0 && (
+          <div className="hidden lg:flex flex-col gap-2 fixed right-6 top-1/2 -translate-y-1/2 z-20">
+            {userMessages.map((msg, index) => {
+              const isActive = activeRequestId === msg.id;
+              return (
+                <button
+                  key={msg.id}
+                  type="button"
+                  onClick={() => scrollToMessage(msg.id)}
+                  className={`w-10 h-10 rounded-full border text-xs font-bold tracking-widest transition-all ${
+                    isActive
+                      ? 'bg-lime-400 text-black shadow-lg shadow-lime-500/30 border-transparent'
+                      : 'border-[var(--border)] text-[var(--muted)] hover:border-lime-300 hover:text-lime-200'
+                  }`}
+                  aria-label={`Jump to request ${index + 1}`}
+                >
+                  {String(index + 1).padStart(2, '0')}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {interactionMode === "read" && (
           <div className="sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-3 md:p-8">
             <div className="max-w-3xl mx-auto">
               <form onSubmit={handleSubmit} className="relative group md:relative fixed bottom-0 left-0 right-0 md:static z-10 bg-[var(--background)] p-4 md:p-0 border-t md:border-t-0 border-[var(--border)]">
-                {messages.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopNarrationForUiChange();
-                      setMessages([]);
-                      setInputValue('');
-                      setReadSuggestions([]);
-                      setSelectedHistory(null);
-                      setSelectedHistoryId(null);
-                    }}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
-                    title="New topic"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                  </button>
-                )}
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => { setInputValue(e.target.value); stopNarration(); }}
-                  placeholder="Ask a story, case, or question..."
-                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-3.5 pl-12 pr-12 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-base placeholder-[var(--muted)]"
-                />
-
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                  {inputValue.trim() ? (
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className="p-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] transition-all"
-                      title="Send"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                      </svg>
-                    </button>
-                  ) : (
+                <div className="relative">
+                  {messages.length > 0 && (
                     <button
                       type="button"
                       onClick={() => {
+                        resetMessageUiState();
                         stopNarrationForUiChange();
-                        resetListenSession();
-                        setInteractionMode("listen");
-                        setIsMicMuted(false);
+                        setMessages([]);
+                        setInputValue('');
+                        setReadSuggestions([]);
+                        setSelectedHistory(null);
+                        setSelectedHistoryId(null);
                       }}
-                      className="p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
-                      title="Listen"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
+                      title="New topic"
                     >
-                      <MicIcon className="w-5 h-5" />
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
                     </button>
                   )}
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => { setInputValue(e.target.value); stopNarration(); }}
+                    placeholder="Ask a story, case, or question..."
+                    className={`w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-3.5 pr-12 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-base placeholder-[var(--muted)] ${
+                      messages.length > 0 ? 'pl-12' : 'pl-4'
+                    }`}
+                  />
+
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                    {inputValue.trim() ? (
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="p-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] transition-all"
+                        title="Send"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={enterListenMode}
+                        className="p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
+                        title="Listen"
+                      >
+                        <MicIcon className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </form>
               <p className="text-[10px] text-center text-[var(--muted)] mt-3 uppercase tracking-widest">
@@ -2127,16 +2758,21 @@ export default function HomeView() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {isNarrating && (
-                  <button
-                    type="button"
-                    onClick={handleStopNarration}
-                    className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--surface-strong)]"
-                  >
+                <button
+                  type="button"
+                  onClick={handleStopNarration}
+                  disabled={!isListenBusy && !isHistoryNarrationLoading}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--surface-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {listenStatus === "thinking" || isHistoryNarrationLoading ? (
+                    <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--muted)] border-t-transparent" />
+                    </span>
+                  ) : (
                     <StopIcon className="w-3.5 h-3.5" />
-                    Stop
-                  </button>
-                )}
+                  )}
+                  {listenStatus === "thinking" || isHistoryNarrationLoading ? "Loading" : "Stop"}
+                </button>
                 <button onClick={closeListenModal} className="text-[var(--muted)] hover:text-[var(--foreground)]">
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2155,11 +2791,7 @@ export default function HomeView() {
                     <p className="text-[11px] uppercase tracking-widest text-[var(--muted)] mb-2">{entry.role === 'user' ? 'You' : 'Narrator'}</p>
                     <div className="text-sm text-[var(--foreground)]">
                       {entry.role === 'assistant' ? (
-                        <div className="prose prose-xs max-w-none dark:prose-invert">
-                          <ReactMarkdown>
-                            {sanitizeNarrationForDisplay(entry.content)}
-                          </ReactMarkdown>
-                        </div>
+                        <span className="whitespace-pre-line">{sanitizeNarrationForDisplay(entry.content)}</span>
                       ) : (
                         <span className="whitespace-pre-line">{entry.content}</span>
                       )}

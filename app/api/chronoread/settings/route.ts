@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../services/authOptions'
 import { getUserSettings, updateUserSettings } from '../../../services/userService'
+import { DEFAULT_GOOGLE_VOICE, TextToSpeechProvider } from '../../../types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,14 +30,13 @@ export async function GET() {
       {
         success: true,
         settings: settings || {
-          narrationTime: 5,
           narrationType: 'Realistic',
-          voiceType: 'zephyr',
+          voiceType: DEFAULT_GOOGLE_VOICE,
           voiceGender: 'auto',
           language: 'English',
-          ttsProvider: 'elevenlabs',
+          ttsProvider: TextToSpeechProvider.GOOGLE,
           aiModel: 'auto',
-          enableBackgroundMusic: true,
+          enableBackgroundMusic: false,
           backgroundMusicVolume: 0.15,
         },
       },

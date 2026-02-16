@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Language, VoiceName, VoiceGender } from "../../types";
+import { Language, VoiceGender, DEFAULT_GOOGLE_VOICE } from "../../types";
+import { listGoogleVoices, GoogleVoice } from "../../services/googleTtsService";
 
 export default function SetupProfile() {
   const router = useRouter();
@@ -22,11 +23,11 @@ export default function SetupProfile() {
 
   const [settings, setSettings] = useState({
     language: Language.ENGLISH,
-    voiceType: VoiceName.ZEPHYR,
+    voiceType: DEFAULT_GOOGLE_VOICE,
     voiceGender: VoiceGender.AUTO,
     narrationType: "Realistic",
-    narrationTime: 5,
   });
+  const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -55,6 +56,26 @@ export default function SetupProfile() {
     }
   }, []);
 
+  useEffect(() => {
+    let isActive = true;
+    listGoogleVoices(settings.language)
+      .then((voices) => {
+        if (!isActive) return;
+        setGoogleVoices(voices);
+        if (!voices.find((voice) => voice.name === settings.voiceType)) {
+          setSettings((prev) => ({
+            ...prev,
+            voiceType: voices[0]?.name || DEFAULT_GOOGLE_VOICE,
+          }));
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isActive = false;
+    };
+  }, [settings.language, settings.voiceType]);
+
   const handleProfileChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
@@ -71,7 +92,7 @@ export default function SetupProfile() {
     const { name, value } = e.target;
     setSettings((prev) => ({
       ...prev,
-      [name]: name === "narrationTime" ? parseInt(value) : value,
+      [name]: value,
     }));
   };
 
@@ -275,11 +296,11 @@ export default function SetupProfile() {
                   onChange={handleSettingsChange}
                   className="w-full bg-[var(--surface-strong)] border border-[var(--border)] rounded-xl px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)] transition-colors"
                 >
-                  <option value={VoiceName.ZEPHYR}>Zephyr (Smooth & Calming)</option>
-                  <option value={VoiceName.KORE}>Kore (Professional & Sharp)</option>
-                  <option value={VoiceName.PUCK}>Puck (Playful & High-energy)</option>
-                  <option value={VoiceName.CHARON}>Charon (Deep & Narrator-like)</option>
-                  <option value={VoiceName.FENRIR}>Fenrir (Bold & Powerful)</option>
+                  {googleVoices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} ({voice.ssmlGender})
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -309,24 +330,6 @@ export default function SetupProfile() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--muted-strong)] mb-3">
-                  Default Read/Listen Time: {settings.narrationTime} minutes
-                </label>
-                <input
-                  type="range"
-                  name="narrationTime"
-                  min="1"
-                  max="15"
-                  value={settings.narrationTime}
-                  onChange={handleSettingsChange}
-                  className="w-full h-2 bg-[var(--surface-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--foreground)]"
-                />
-                <div className="flex justify-between text-xs text-[var(--muted)] mt-2">
-                  <span>1 min</span>
-                  <span>15 mins</span>
-                </div>
-              </div>
             </div>
           )}
         </div>

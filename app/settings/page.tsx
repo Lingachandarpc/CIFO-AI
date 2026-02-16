@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Settings, Language, VoiceName, TextToSpeechProvider, VoiceGender, AIModel } from "../types";
-import { ELEVENLABS_VOICES, getVoicesForLanguageAndGender } from "../services/elevenLabsService";
+import { Settings, Language, TextToSpeechProvider, VoiceGender, AIModel, DEFAULT_GOOGLE_VOICE } from "../types";
+import { filterVoicesByGender, listGoogleVoices, GoogleVoice } from "../services/googleTtsService";
 
 const defaultSettings: Settings = {
-  narrationTime: 5,
   narrationType: "Realistic",
-  voiceType: VoiceName.ZEPHYR,
+  voiceType: DEFAULT_GOOGLE_VOICE,
   voiceGender: VoiceGender.AUTO,
   language: Language.ENGLISH,
-  ttsProvider: TextToSpeechProvider.ELEVENLABS,
+  ttsProvider: TextToSpeechProvider.GOOGLE,
   aiModel: AIModel.AUTO,
-  enableBackgroundMusic: true,
+  enableBackgroundMusic: false,
   backgroundMusicVolume: 0.15,
 };
 
@@ -27,6 +27,7 @@ type ProfileForm = {
 };
 
 export default function SettingsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"narration" | "profile">("narration");
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [profile, setProfile] = useState<ProfileForm>({
@@ -41,11 +42,42 @@ export default function SettingsPage() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
 
   const availableVoices = useMemo(
-    () => getVoicesForLanguageAndGender(settings.language, settings.voiceGender),
-    [settings.language, settings.voiceGender]
+    () => filterVoicesByGender(googleVoices, settings.voiceGender),
+    [googleVoices, settings.voiceGender]
   );
+  const selectedVoice = useMemo(
+    () => googleVoices.find((voice) => voice.name === settings.voiceType),
+    [googleVoices, settings.voiceType]
+  );
+
+  useEffect(() => {
+    let isActive = true;
+    listGoogleVoices(settings.language)
+      .then((voices) => {
+        if (!isActive) return;
+        setGoogleVoices(voices);
+      })
+      .catch(() => {});
+
+    return () => {
+      isActive = false;
+    };
+  }, [settings.language]);
+
+  useEffect(() => {
+    if (!googleVoices.length) return;
+    const candidates = availableVoices.length ? availableVoices : googleVoices;
+    const nextVoice = candidates[0]?.name || DEFAULT_GOOGLE_VOICE;
+    if (nextVoice && settings.voiceType !== nextVoice) {
+      setSettings((prev) => ({
+        ...prev,
+        voiceType: nextVoice,
+      }));
+    }
+  }, [googleVoices, availableVoices, settings.voiceType]);
 
   useEffect(() => {
     const loadSettingsAndProfile = async () => {
@@ -63,6 +95,7 @@ export default function SettingsPage() {
               loadedModel === AIModel.OPENAI ||
               loadedModel === AIModel.CLAUDE_SONNET ||
               loadedModel === AIModel.XAI ||
+              loadedModel === AIModel.GEMINI ||
               loadedModel === AIModel.AUTO
                 ? loadedModel
                 : AIModel.AUTO;
@@ -111,6 +144,7 @@ export default function SettingsPage() {
       }
 
       setStatusMessage("Response settings saved.");
+      router.push("/");
     } catch (error) {
       console.error("Error saving settings:", error);
       setStatusMessage("Unable to save response settings.");
@@ -142,6 +176,7 @@ export default function SettingsPage() {
       }
 
       setStatusMessage("Profile updated.");
+      router.push("/");
     } catch (error) {
       console.error("Error saving profile:", error);
       setStatusMessage("Unable to save profile details.");
@@ -218,29 +253,14 @@ export default function SettingsPage() {
                 <option value={AIModel.AUTO}>Auto (fastest available)</option>
                 <option value={AIModel.OPENAI}>OpenAI</option>
                 <option value={AIModel.CLAUDE_SONNET}>Claude Sonnet</option>
+                <option value={AIModel.GEMINI}>Gemini</option>
                 <option value={AIModel.XAI}>xAI</option>
               </select>
               <p className="mt-2 text-xs text-[var(--muted)]">
                 Auto uses the lowest-latency model based on recent responses.
               </p>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Text-to-Speech Provider</label>
-              <select
-                value={settings.ttsProvider}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    ttsProvider: e.target.value as TextToSpeechProvider,
-                  }))
-                }
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
-              >
-                <option value={TextToSpeechProvider.ELEVENLABS}>ElevenLabs (Advanced)</option>
-                <option value={TextToSpeechProvider.OPENAI}>OpenAI</option>
-                <option value={TextToSpeechProvider.OPEN_SOURCE}>Open-source (Browser TTS)</option>
-              </select>
-            </div>
+            {/* Text-to-Speech Provider selection is temporarily hidden while Google TTS is default. */}
 
             <div>
               <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Language</label>
@@ -280,32 +300,20 @@ export default function SettingsPage() {
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                Auto matches language cadence. Selected: {settings.voiceGender}.
+              </p>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Voice Persona</label>
-              <div className="grid gap-3">
-                {availableVoices.map((voiceName) => {
-                  const voice = ELEVENLABS_VOICES[voiceName];
-                  return (
-                    <button
-                      key={voiceName}
-                      type="button"
-                      onClick={() => setSettings((prev) => ({ ...prev, voiceType: voiceName }))}
-                      className={`rounded-xl border px-4 py-3 text-left transition-all ${
-                        settings.voiceType === voiceName
-                          ? "border-[var(--foreground)] bg-[var(--foreground)] text-[var(--background)]"
-                          : "border-[var(--border)] bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:bg-[var(--surface)]"
-                      }`}
-                    >
-                      <div className="font-semibold capitalize">{voice.name}</div>
-                      <div className="text-xs opacity-80">{voice.description}</div>
-                    </button>
-                  );
-                })}
-              </div>
-              {availableVoices.length === 0 && (
-                <p className="mt-2 text-xs text-[var(--muted)]">No voices available for this language.</p>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4">
+              <p className="text-sm font-semibold text-[var(--muted-strong)]">Voice Persona</p>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Personas are auto-selected based on gender and language.
+              </p>
+              {selectedVoice && (
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  Current voice: {selectedVoice.name} • {selectedVoice.ssmlGender} • {selectedVoice.languageCodes?.[0] || settings.language}
+                </p>
               )}
             </div>
 
@@ -327,63 +335,6 @@ export default function SettingsPage() {
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-                Read/Listen Time: {settings.narrationTime} minutes
-              </label>
-              <input
-                type="range"
-                min="2"
-                max="15"
-                value={settings.narrationTime}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    narrationTime: parseInt(e.target.value, 10),
-                  }))
-                }
-                className="w-full accent-[var(--foreground)]"
-              />
-            </div>
-
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4">
-              <label className="flex items-center gap-2 mb-3 text-sm font-semibold text-[var(--muted-strong)]">
-                <input
-                  type="checkbox"
-                  checked={settings.enableBackgroundMusic}
-                  onChange={(e) =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      enableBackgroundMusic: e.target.checked,
-                    }))
-                  }
-                  className="h-4 w-4 accent-[var(--foreground)]"
-                />
-                Enable Genre-Specific Background Music
-              </label>
-              {settings.enableBackgroundMusic && (
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--muted)] mb-2">
-                    Music Volume: {Math.round(settings.backgroundMusicVolume * 100)}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={settings.backgroundMusicVolume}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        backgroundMusicVolume: parseFloat(e.target.value),
-                      }))
-                    }
-                    className="w-full accent-[var(--foreground)]"
-                  />
-                </div>
-              )}
             </div>
 
             <button

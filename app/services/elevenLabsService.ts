@@ -153,7 +153,7 @@ export const NARRATION_SETTINGS: Record<
 
 export async function generateSpeechWithElevenLabs(
   text: string,
-  voiceType: VoiceName,
+  voiceType: string,
   language: Language,
   narrationType: 'Realistic' | 'Dramatic' | 'Educational',
   voiceGender: VoiceGender = VoiceGender.AUTO
@@ -162,8 +162,10 @@ export async function generateSpeechWithElevenLabs(
     const voiceSettings = NARRATION_SETTINGS[narrationType] || NARRATION_SETTINGS.Realistic;
     const preferredVoices = getVoicesForLanguageAndGender(language, voiceGender);
     const languageVoices = getVoicesForLanguage(language);
-    const resolvedVoiceType = preferredVoices.includes(voiceType)
-      ? voiceType
+    const isLegacyVoice = Object.values(VoiceName).includes(voiceType as VoiceName);
+    const legacyVoice = isLegacyVoice ? (voiceType as VoiceName) : VoiceName.FENRIR;
+    const resolvedVoiceType = preferredVoices.includes(legacyVoice)
+      ? legacyVoice
       : preferredVoices[0] || languageVoices[0] || VoiceName.FENRIR;
     const voice = ELEVENLABS_VOICES[resolvedVoiceType];
 
