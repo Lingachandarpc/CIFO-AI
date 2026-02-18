@@ -95,6 +95,7 @@ The middleware layer is a **centralized orchestration service** that sits betwee
 ### 1. **middlewareService.ts** - Core Orchestrator
 
 **Responsibilities:**
+
 - Fetch Tavily web search results
 - Enrich queries with user context (profile, mood, learning history)
 - Build middleware context object
@@ -132,8 +133,8 @@ interface UserMindContext {
     bio?: string;
   };
   mood?: {
-    current: 'curious' | 'focused' | 'creative' | 'analytical' | 'casual';
-    energy: 'low' | 'medium' | 'high';
+    current: "curious" | "focused" | "creative" | "analytical" | "casual";
+    energy: "low" | "medium" | "high";
     preferences: string[];
   };
   recentQueries?: string[];
@@ -145,19 +146,22 @@ interface UserMindContext {
 }
 
 interface EnhancedResponse {
-  narration: string;                    // Combined AI + web sources
-  modelUsed: string;                   // AI model name
-  webSources?: Array<{                 // Top 3 web sources
+  narration: string; // Combined AI + web sources
+  modelUsed: string; // AI model name
+  webSources?: Array<{
+    // Top 3 web sources
     title: string;
     url: string;
     snippet: string;
   }>;
-  contextApplied: {                    // What context was used
+  contextApplied: {
+    // What context was used
     userProfile: boolean;
     mood: boolean;
     webSearch: boolean;
   };
-  metadata: {                          // Performance metrics
+  metadata: {
+    // Performance metrics
     processingTime: number;
     searchResultsCount: number;
     aiTokensUsed?: number;
@@ -177,6 +181,7 @@ interface EnhancedResponse {
 - `openaiAdapter()` - GPT-4o-mini
 
 Each adapter:
+
 1. Receives enriched query + middleware context
 2. Formats context for specific AI model
 3. Calls AI service (with `enableWebSearch: false` to avoid duplication)
@@ -188,13 +193,21 @@ Each adapter:
 
 ```typescript
 class UserMindStorage {
-  async getUserContext(userId: string): Promise<UserMindContext>
-  async updateUserContext(userId: string, context: Partial<UserMindContext>): Promise<void>
-  async trackLearning(userId: string, topic: string, engagement: number): Promise<void>
+  async getUserContext(userId: string): Promise<UserMindContext>;
+  async updateUserContext(
+    userId: string,
+    context: Partial<UserMindContext>,
+  ): Promise<void>;
+  async trackLearning(
+    userId: string,
+    topic: string,
+    engagement: number,
+  ): Promise<void>;
 }
 ```
 
 **Future Features:**
+
 - 🧠 **Mood Detection**: Analyze query patterns to infer user mood
 - 📚 **Learning Paths**: Track topics over time, suggest related content
 - 🎯 **Personalization**: Adapt narration style based on engagement history
@@ -203,7 +216,9 @@ class UserMindStorage {
 ## Why Middleware Architecture?
 
 ### Problem with Old Approach
+
 Each AI service duplicated:
+
 - Tavily search logic (4x copies)
 - Context enrichment (4x copies)
 - Response formatting (inconsistent)
@@ -211,6 +226,7 @@ Each AI service duplicated:
 Result: **All models gave similar responses** because they all received identical Tavily-enriched prompts.
 
 ### Solution: Middleware Layer
+
 1. **Centralized Tavily**: One source of truth for web search
 2. **Post-Processing Combination**: AI generates narrative independently, middleware adds web sources as citations
 3. **Consistent Context**: All models receive same enriched context, but maintain unique styles
@@ -219,24 +235,26 @@ Result: **All models gave similar responses** because they all received identica
 ## Response Difference Example
 
 ### Old Approach (Tavily in prompt):
+
 ```
 Query: "Latest AI breakthroughs"
 
-OpenAI Response: "Based on recent developments in February 2026, OpenAI 
+OpenAI Response: "Based on recent developments in February 2026, OpenAI
 released GPT-5 with 10T parameters... [Tavily content mixed in]"
 
-Gemini Response: "According to latest sources from February 2026, OpenAI 
+Gemini Response: "According to latest sources from February 2026, OpenAI
 released GPT-5 with 10T parameters... [Same Tavily content]"
 
 Result: Nearly identical responses ❌
 ```
 
 ### New Middleware Approach:
+
 ```
 Query: "Latest AI breakthroughs"
 
-OpenAI Response: "Artificial intelligence has reached remarkable milestones 
-in reasoning and multimodal understanding. The latest generation of models 
+OpenAI Response: "Artificial intelligence has reached remarkable milestones
+in reasoning and multimodal understanding. The latest generation of models
 demonstrates unprecedented capabilities in complex problem-solving..."
 
 + Middleware adds:
@@ -246,8 +264,8 @@ demonstrates unprecedented capabilities in complex problem-solving..."
 [2] Google's Gemini 3 Preview Released - theverge.com
 [3] Anthropic's Claude 4 Benchmarks - arstechnica.com
 
-Gemini Response: "The evolution of AI systems has accelerated remarkably. 
-Modern frontier models excel at multi-step reasoning, combining vision, 
+Gemini Response: "The evolution of AI systems has accelerated remarkably.
+Modern frontier models excel at multi-step reasoning, combining vision,
 language, and structured data into cohesive outputs..."
 
 + Same web sources appended
@@ -290,21 +308,25 @@ export async function POST(req: Request) {
 ## Future Enhancements
 
 ### Phase 1: Mood Detection (Current)
+
 - ✅ Mood context structure defined
 - ⚪ Auto-detect mood from query tone
 - ⚪ Adjust narration style based on mood
 
 ### Phase 2: Mind Storage (Database Integration)
+
 - ⚪ Store user learning history in Prisma
 - ⚪ Track engagement metrics
 - ⚪ Build user knowledge graph
 
 ### Phase 3: Personalization
+
 - ⚪ Recommend topics based on history
 - ⚪ Adaptive narration length/complexity
 - ⚪ Multi-turn conversation awareness
 
 ### Phase 4: Advanced Features
+
 - ⚪ Real-time fact-checking (Tavily + AI verification)
 - ⚪ Multi-source synthesis (combine multiple web results)
 - ⚪ Audio tone modulation based on mood
@@ -315,11 +337,13 @@ export async function POST(req: Request) {
 ### If You Need to Add a New AI Model
 
 1. **Create Service** (e.g., `app/services/newModelService.ts`)
+
    ```typescript
    export async function generateNarrative(query: string, ...): Promise<string>
    ```
 
 2. **Create Adapter** in `app/services/aiAdapters.ts`
+
    ```typescript
    export async function newModelAdapter(
      enrichedQuery: string,
@@ -342,6 +366,7 @@ export async function POST(req: Request) {
 ### If You Need to Add Mood/Context Features
 
 1. **Update Types** in `middlewareService.ts`
+
    ```typescript
    interface UserMindContext {
      // Add new fields here
@@ -349,8 +374,12 @@ export async function POST(req: Request) {
    ```
 
 2. **Update `enrichQueryWithContext()`** in `middlewareService.ts`
+
    ```typescript
-   function enrichQueryWithContext(query: string, userContext: UserMindContext): string {
+   function enrichQueryWithContext(
+     query: string,
+     userContext: UserMindContext,
+   ): string {
      // Add your enrichment logic
    }
    ```
@@ -365,13 +394,16 @@ export async function POST(req: Request) {
 ## Testing
 
 ### Test Middleware Independently
+
 ```bash
 # Test script coming soon...
 node scripts/test-middleware.js
 ```
 
 ### Compare Model Responses
+
 Visit `/test-models` (demo page coming soon) to see side-by-side comparison of:
+
 - OpenAI (GPT-4o-mini)
 - Gemini (2.5 Flash)
 - Claude (Sonnet)
@@ -389,6 +421,7 @@ All using the same middleware context!
 ## Conclusion
 
 The middleware layer provides:
+
 - ✅ Centralized web search (one Tavily call)
 - ✅ Consistent context enrichment
 - ✅ Distinct AI responses with shared citations
@@ -399,6 +432,7 @@ The middleware layer provides:
 ---
 
 **Next Steps:**
+
 1. Test with all 4 AI models
 2. Verify web sources appear in responses
 3. Implement mood detection logic
