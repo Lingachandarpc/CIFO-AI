@@ -15,6 +15,7 @@ const defaultSettings: Settings = {
   aiModel: AIModel.AUTO,
   enableBackgroundMusic: false,
   backgroundMusicVolume: 0.15,
+  enableWebSearch: true,
 };
 
 type ProfileForm = {
@@ -348,69 +349,133 @@ export default function SettingsPage() {
           </div>
         ) : (
           <div className="space-y-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            {/* Info Box: Auto-save from chat */}
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-3">
+              <p className="text-xs font-semibold text-[var(--muted-strong)] uppercase tracking-widest">ℹ️ Auto-Updated from Chat</p>
+              <p className="mt-1.5 text-xs text-[var(--muted)]">
+                Your profile is automatically updated from conversations. Fields below reflect information you mention during chats (e.g., "I'm from Chennai", "I'm 25 years old", "I love photography").
+              </p>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Name</label>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-sm font-semibold text-[var(--muted-strong)]">Name</label>
+                  <span className="group relative cursor-help">
+                    <span className="text-[10px] text-[var(--muted)]">?</span>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-[var(--surface-strong)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--muted)] whitespace-nowrap z-10">
+                      Your full name as mentioned in chats
+                    </div>
+                  </span>
+                </div>
                 <input
                   type="text"
                   value={profile.name}
                   onChange={(e) => handleProfileChange("name", e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+                  placeholder="John Doe"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)]"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Age</label>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-sm font-semibold text-[var(--muted-strong)]">Age</label>
+                  <span className="group relative cursor-help">
+                    <span className="text-[10px] text-[var(--muted)]">?</span>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-[var(--surface-strong)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--muted)] whitespace-nowrap z-10">
+                      Your age (13-120 years)
+                    </div>
+                  </span>
+                </div>
                 <input
                   type="number"
                   min="13"
                   max="120"
                   value={profile.age}
                   onChange={(e) => handleProfileChange("age", e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+                  placeholder="25"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)]"
                 />
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Location</label>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-sm font-semibold text-[var(--muted-strong)]">Location</label>
+                  <span className="group relative cursor-help">
+                    <span className="text-[10px] text-[var(--muted)]">?</span>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-[var(--surface-strong)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--muted)] whitespace-nowrap z-10">
+                      City, state, or country from chats
+                    </div>
+                  </span>
+                </div>
                 <input
                   type="text"
                   value={profile.location}
                   onChange={(e) => handleProfileChange("location", e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+                  placeholder="Chennai, Tamil Nadu, India"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)]"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Interests</label>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-sm font-semibold text-[var(--muted-strong)]">Interests</label>
+                  <span className="group relative cursor-help">
+                    <span className="text-[10px] text-[var(--muted)]">?</span>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-[var(--surface-strong)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--muted)] whitespace-nowrap z-10">
+                      Topics separated by | (auto-appended)
+                    </div>
+                  </span>
+                </div>
                 <input
                   type="text"
                   value={profile.interests}
                   onChange={(e) => handleProfileChange("interests", e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+                  placeholder="AI | Photography | Travel | Science"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)]"
                 />
+                <p className="mt-1 text-[10px] text-[var(--muted)]">Separate multiple interests with |</p>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Personality Pulse</label>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="block text-sm font-semibold text-[var(--muted-strong)]">Personality Pulse</label>
+                <span className="group relative cursor-help">
+                  <span className="text-[10px] text-[var(--muted)]">?</span>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-[var(--surface-strong)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--muted)] whitespace-nowrap z-10">
+                    Traits separated by | (auto-appended)
+                  </div>
+                </span>
+              </div>
               <input
                 type="text"
                 value={profile.pulse}
                 onChange={(e) => handleProfileChange("pulse", e.target.value)}
-                placeholder="Calm, curious, intense..."
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+                placeholder="Curious | Creative | Detail-oriented | Calm"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)]"
               />
+              <p className="mt-1 text-[10px] text-[var(--muted)]">Separate multiple traits with |</p>
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Bio</label>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="block text-sm font-semibold text-[var(--muted-strong)]">Bio</label>
+                <span className="group relative cursor-help">
+                  <span className="text-[10px] text-[var(--muted)]">?</span>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-[var(--surface-strong)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--muted)] whitespace-nowrap z-10">
+                    Background facts separated by |
+                  </div>
+                </span>
+              </div>
               <textarea
                 value={profile.bio}
                 onChange={(e) => handleProfileChange("bio", e.target.value)}
+                placeholder="Software engineer | Masters in CS | Passionate about AI ethics | Active photographer"
                 rows={4}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] placeholder-[var(--muted)] focus:outline-none focus:border-[var(--muted-strong)] resize-none"
               />
+              <p className="mt-1 text-[10px] text-[var(--muted)]">Separate multiple facts with |</p>
             </div>
 
             <button

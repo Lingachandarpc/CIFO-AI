@@ -77,6 +77,7 @@ export interface Settings {
   aiModel: AIModel;
   enableBackgroundMusic: boolean;
   backgroundMusicVolume: number; // 0.0 - 1.0
+  enableWebSearch: boolean; // Always enabled for real-time data
 }
 
 export interface ChatMessage {
@@ -88,6 +89,7 @@ export interface ChatMessage {
   audioBlob?: string;
   modelUsed?: AIModel;
   animate?: boolean;
+  referencesHtml?: string; // Favicon-based references HTML
 }
 
 export interface VoiceProfile {
@@ -112,4 +114,5 @@ export interface HistoryItem {
   modelUsed?: AIModel;
   voiceProfile?: VoiceProfile;
   conversation?: Array<Pick<ChatMessage, "role" | "content" | "timestamp">>;
+  referencesHtml?: string; // Favicon-based references HTML
 }

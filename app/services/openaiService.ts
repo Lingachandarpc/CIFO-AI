@@ -23,7 +23,7 @@ export async function generateNarrative(
     previousNarration?: string;
     userInterruption?: string;
   }
-): Promise<{ narration: string; modelUsed?: string }> {
+): Promise<{ narration: string; modelUsed?: string; referencesHtml?: string }> {
   try {
     const category = mode === SearchMode.BOOK ? 'Book' : mode === SearchMode.CASE_STUDY ? 'Case Study' : 'Ask';
     const res = await fetch(`${API_BASE}/ai`, {
@@ -32,9 +32,11 @@ export async function generateNarrative(
       body: JSON.stringify({ 
         query, 
         category,
+        narrationTime: 2.5, // Default 2.5 minutes
         narrationType: settings.narrationType,
         language: settings.language,
         aiModel: settings.aiModel,
+        enableWebSearch: settings.enableWebSearch ?? true,
         interactionMode,
         chatHistory,
         userContext,
@@ -49,7 +51,11 @@ export async function generateNarrative(
     }
 
     const data = await res.json();
-    return { narration: data.narration || '', modelUsed: data.modelUsed };
+    return { 
+      narration: data.narration || '', 
+      modelUsed: data.modelUsed,
+      referencesHtml: data.referencesHtml,
+    };
   } catch (error) {
     console.error('Error generating narrative (proxy):', error);
     return { narration: 'Sorry — AI is unavailable right now.' };

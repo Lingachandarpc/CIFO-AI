@@ -1,11 +1,16 @@
 /**
- * Google Gemini Service with Web Search Integration
- * Fetches real-time web results via Tavily, then passes to Gemini for narration
+ * Claude (Anthropic) Service with Web Search Integration
+ * Fetches real-time web results via Tavily, then passes to Claude for narration
  */
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const TAVILY_API_URL = 'https://api.tavily.com/search';
+const MODEL = 'claude-sonnet-4-20250514';
+
+export interface ClaudeMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 interface SearchResult {
   title: string;
@@ -32,7 +37,7 @@ async function fetchWebSearchResults(query: string): Promise<SearchResult[]> {
         query,
         include_answer: true,
         max_results: 5,
-        topic: 'news',
+        topic: 'news', // Always get latest news/updates
       }),
     });
 
@@ -127,11 +132,11 @@ export async function generateNarrativeWithWebSearch(
     };
     recentQueries?: string[];
   },
-  prefetchedWebResults?: SearchResult[] // NEW: Allow middleware to pass pre-fetched results
+  prefetchedWebResults?: Array<{title: string; url: string; content: string}> // NEW: Allow middleware to pass pre-fetched results
 ): Promise<{ narration: string; modelUsed: string }> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return { narration: 'Gemini API key not configured', modelUsed: 'gemini' };
+    return { narration: 'Claude API key not configured', modelUsed: 'claude-sonnet' };
   }
 
   try {
@@ -235,7 +240,7 @@ export async function generateNarrativeWithWebSearch(
     if (needsLocation && !isRespondingToClarification) {
       return {
         narration: `To provide accurate ${/(weather|temperature|forecast)/.test(query.toLowerCase()) ? 'weather' : ''} information, could you please specify your location? For example: "weather in New York" or "temperature in London".`,
-        modelUsed: 'gemini'
+        modelUsed: 'claude'
       };
     }
 
@@ -317,79 +322,65 @@ Language: ${language}
 ${styleInstruction}
 ${enableWebSearch && searchContext ? '\nYou have been provided with current web search results. ALWAYS prioritize this information over your training data when there are discrepancies. If the query asks about current/recent information, use ONLY the web results provided.' : ''}`;
 
-    // Build contents array with conversation history
-    const contents = [];
+    // Build messages array with conversation history
+    const messages: ClaudeMessage[] = [];
     
-    // Add system prompt as first user message
-    contents.push({
-      role: 'user',
-      parts: [{ text: systemPrompt }]
-    });
-    contents.push({
-      role: 'model',
-      parts: [{ text: 'Understood. I will create engaging narratives following these guidelines.' }]
-    });
-
     // Add chat history (last 5 messages)
     const recentHistory = chatHistory.slice(-5);
     for (const msg of recentHistory) {
-      contents.push({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }]
-      });
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({
+          role: msg.role,
+          content: msg.content,
+        });
+      }
     }
 
     // Add current query
-    contents.push({
+    messages.push({
       role: 'user',
-      parts: [{ text: listenModeInstructions }]
+      content: listenModeInstructions,
     });
 
-    const apiUrl = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const response = await fetch(apiUrl, {
+    const response = await fetch(CLAUDE_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        contents,
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096,
-        },
+        model: MODEL,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages,
       }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      console.error('Gemini API error:', response.status, errorText);
+      console.error('Claude API error:', response.status);
       return { 
-        narration: 'Sorry — Gemini AI is unavailable right now.', 
-        modelUsed: 'gemini' 
+        narration: 'Sorry — Claude AI is unavailable right now.', 
+        modelUsed: 'claude-sonnet' 
       };
     }
 
-    interface GeminiResponse {
-      candidates: Array<{
-        content: {
-          parts: Array<{
-            text: string;
-          }>;
-        };
+    interface ClaudeResponse {
+      content: Array<{
+        type: string;
+        text: string;
       }>;
     }
 
-    const data = (await response.json()) as GeminiResponse;
-    const narration = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const data = (await response.json()) as ClaudeResponse;
+    const narration = data.content?.[0]?.text || '';
 
-    return { narration, modelUsed: 'gemini' };
+    return { narration, modelUsed: 'claude-sonnet' };
   } catch (error) {
-    console.error('Error generating narrative with Gemini:', error);
+    console.error('Error generating narrative with Claude:', error);
     return { 
-      narration: 'Sorry — Gemini AI encountered an error.', 
-      modelUsed: 'gemini' 
+      narration: 'Sorry — Claude AI encountered an error.', 
+      modelUsed: 'claude-sonnet' 
     };
   }
 }

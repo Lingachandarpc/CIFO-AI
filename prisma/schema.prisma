@@ -63,19 +63,39 @@ model VerificationToken {
 
 // User Profile - Extended user information for personalization
 model UserProfile {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
-  location  String?
-  interests String?  // JSON or comma-separated tags
-  pulse     String?  // User's unique vibe/personality descriptor
-  bio       String?
-  age       Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique
+  country         String?  // Country name (inferred from queries or profile setup)
+  state           String?  // State/Province (for weather, news context)
+  location        String?  // Full location string (city, etc)
+  interests       String?  // JSON or comma-separated tags - learned from queries
+  pulse           String?  // User's unique vibe/personality descriptor
+  bio             String?
+  age             Int?
+  questionTypes   String?  // JSON: categories of questions user asks
+  preferredLength String?  // "concise", "detailed", "balanced"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interactions    UserInteractionHistory[]
 
   @@index([userId])
+}
+
+// User Interaction History - Track queries to learn user patterns
+model UserInteractionHistory {
+  id           Int      @id @default(autoincrement())
+  profileId    Int
+  query        String
+  category     String?  // "time", "weather", "learning", "research", etc
+  responseLength Int?   // words in response
+  timestamp    DateTime @default(now())
+
+  profile UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([timestamp])
 }
 
 // User Settings - Narration preferences per user

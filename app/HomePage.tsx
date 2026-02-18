@@ -23,6 +23,7 @@ export default function Home() {
     aiModel: AIModel.AUTO,
     enableBackgroundMusic: true,
     backgroundMusicVolume: 0.15,
+    enableWebSearch: true,
   });
   const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
 

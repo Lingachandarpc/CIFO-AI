@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { SearchMode, Settings, ChatMessage, HistoryItem, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel, VoiceProfile, DEFAULT_GOOGLE_VOICE } from './types';
-import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon } from '../components/Icons';
+import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon, VolumeIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
 import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions } from './services/openaiService';
 import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
@@ -13,6 +13,8 @@ import { filterVoicesByGender, generateSpeechWithGoogle, getGoogleLanguageCode, 
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import ChartRenderer, { parseChartJson, type ChartData } from '../components/ChartRenderer';
 
 type TabsBlock = { label: string; content: string };
 
@@ -22,20 +24,29 @@ const parseTabsBlock = (raw: string): TabsBlock[] => {
   let current: TabsBlock | null = null;
 
   lines.forEach((line) => {
-    const match = line.match(/^Tab:\s*(.+)$/i);
-    if (match) {
+    // Match: "Tab: Label" or "**Tab ...: Label**" or "**Tab: Label**" formats
+    const match = line.match(/^[\*]*\s*Tab[\*]*\s*[\:\s]+(.+?)[\*]*\s*$/i) || 
+                  line.match(/^[\*\*]+\s*(.+?)\s*[\*\*]+\s*$/i);
+    
+    if (match && (line.toLowerCase().includes('tab') || line.includes('**'))) {
       if (current) tabs.push(current);
-      current = { label: match[1].trim(), content: '' };
+      let label = match[1].trim();
+      // Clean up label - remove markdown formatting
+      label = label.replace(/\*\*/g, '').replace(/^tab[\s:]+/i, '').trim();
+      current = { label: label || 'Tab', content: '' };
       return;
     }
     if (!current) {
       current = { label: 'Overview', content: '' };
     }
-    current.content += `${line}\n`;
+    if (line.trim()) {
+      current.content += `${line}\n`;
+    }
   });
 
   if (current) tabs.push(current);
-  return tabs.map((tab) => ({ ...tab, content: tab.content.trim() })).filter((tab) => tab.content);
+  return tabs.map((tab) => ({ ...tab, content: tab.content.trim() }))
+    .filter((tab) => tab.content && tab.label);
 };
 
 const MarkdownBody = ({ content }: { content: string }) => (
@@ -123,30 +134,12 @@ const SliderBlockView = ({ raw }: { raw: string }) => {
 const RichMarkdown = ({ content }: { content: string }) => (
   <ReactMarkdown
     remarkPlugins={[remarkGfm]}
+    rehypePlugins={[rehypeRaw]}
     components={{
-      table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
-          <table className="w-full border-collapse text-sm">{children}</table>
-        </div>
-      ),
-      th: ({ children }) => (
-        <th className="border-b border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-left text-[11px] uppercase tracking-widest text-[var(--muted)]">
-          {children}
-        </th>
-      ),
-      td: ({ children }) => (
-        <td className="border-b border-[var(--border)] px-3 py-2 text-[var(--foreground)]">
-          {children}
-        </td>
-      ),
       code: ({ className, children }) => {
-        const language = /language-(\w+)/.exec(className || '')?.[1];
+        const language = /language-([\w-]+)/.exec(className || '')?.[1];
         const raw = String(children).trim();
         const isInline = !className;
-
-        if (!isInline && language === 'tabs') {
-          return <TabsBlockView raw={raw} />;
-        }
 
         if (!isInline && language === 'slider') {
           return <SliderBlockView raw={raw} />;
@@ -158,6 +151,17 @@ const RichMarkdown = ({ content }: { content: string }) => (
               {raw}
             </pre>
           );
+        }
+
+        // Chart detection - handle json-chart code blocks
+        if (!isInline && (language === 'json-chart' || language === 'chart')) {
+          try {
+            const chartData = JSON.parse(raw) as ChartData;
+            return <ChartRenderer chartData={chartData} />;
+          } catch (error) {
+            console.error('Failed to parse chart data:', error);
+            // Fall through to regular code block display
+          }
         }
 
         if (isInline) {
@@ -174,6 +178,16 @@ const RichMarkdown = ({ content }: { content: string }) => (
           </pre>
         );
       },
+      p: ({ children }) => {
+        // Skip rendering empty or whitespace-only paragraphs
+        const text = String(children).trim();
+        if (!text) return null;
+        
+        // Reduce paragraph margins to prevent gaps before tables
+        return (
+          <p className="text-sm text-[var(--foreground)] my-1">{children}</p>
+        );
+      },
     }}
   >
     {content}
@@ -187,6 +201,7 @@ export default function HomeView() {
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.CASE_STUDY);
   const [interactionMode, setInteractionMode] = useState<"read" | "listen">("read");
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyTab, setHistoryTab] = useState<"all" | "chat" | "voice">("all"); // NEW: History tab filter
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [listenStatus, setListenStatus] = useState<"idle" | "listening" | "thinking" | "narrating" | "completed">("idle");
@@ -213,6 +228,7 @@ export default function HomeView() {
     aiModel: AIModel.AUTO,
     enableBackgroundMusic: false,
     backgroundMusicVolume: 0.15,
+    enableWebSearch: true,
   });
   const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
   const [lastAutoModel, setLastAutoModel] = useState<AIModel | null>(null);
@@ -237,7 +253,7 @@ export default function HomeView() {
   const typewriterFrameRef = useRef<number | null>(null);
   const activeTypewriterMessageRef = useRef<string | null>(null);
   const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const TYPEWRITER_CHARS_PER_SECOND = 140;
+  const TYPEWRITER_CHARS_PER_SECOND = 250; // Increased for faster typing effect
   const getHistoryStorageKey = (id: number | null) =>
     id ? `narrative_history_${id}` : 'narrative_history_guest';
 
@@ -306,7 +322,58 @@ export default function HomeView() {
   const lastListenTranscriptRef = useRef<string>('');
   const lastListenTranscriptAtRef = useRef<number>(0);
   const handleListenTranscriptRef = useRef<(transcript: string) => void>(() => {});
+  const manualScrollUntilRef = useRef<number>(0); // Track manual scroll time to disable observer updates
   const userMessages = useMemo(() => messages.filter((msg) => msg.role === 'user'), [messages]);
+
+  // NEW: Filter and sort history by tab (Chat/Voice) with recent first
+  const filteredHistory = useMemo(() => {
+    let filtered = [...history];
+    
+    // Filter by tab
+    if (historyTab === "chat") {
+      filtered = filtered.filter(item => item.interactionMode === "read");
+    } else if (historyTab === "voice") {
+      filtered = filtered.filter(item => item.interactionMode === "listen");
+    }
+    
+    // Sort by timestamp - recent first
+    filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    
+    return filtered;
+  }, [history, historyTab]);
+
+  // ============================================================================
+  // CLEANUP: Stop narration when component unmounts or window closes
+  // ============================================================================
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Stop any active narration when window/tab is closing
+      if (currentSourceRef.current) {
+        try { currentSourceRef.current.stop(); } catch {}
+        try { currentSourceRef.current.disconnect(); } catch {}
+        currentSourceRef.current = null;
+      }
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch {}
+      }
+      stopAmbientMusic();
+    };
+
+    // Listen for page unload/window closure
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    // Cleanup on component unmount
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Stop narration when component unmounts
+      if (currentSourceRef.current) {
+        try { currentSourceRef.current.stop(); } catch {}
+        try { currentSourceRef.current.disconnect(); } catch {}
+        currentSourceRef.current = null;
+      }
+      stopAmbientMusic();
+    };
+  }, []);
 
   const startRecognition = (continuous: boolean) => {
     if (!recognitionRef.current) return;
@@ -789,11 +856,12 @@ export default function HomeView() {
   };
 
   const persistHistory = (items: HistoryItem[]) => {
-    const buildPayload = (options: { maxItems: number; maxResponseChars: number; includeConversation: boolean }) => {
+    const buildPayload = (options: { maxItems: number; maxResponseChars: number; includeFullConversation: boolean }) => {
       return items.slice(0, options.maxItems).map((item) => {
         const isListen = item.interactionMode === "listen";
-        const conversation = options.includeConversation
-          ? item.conversation?.slice(-8)
+        // ALWAYS preserve full conversation to prevent data loss on refresh
+        const conversation = options.includeFullConversation
+          ? item.conversation // Keep all messages, never slice
           : undefined;
         const responseLimit = isListen
           ? Math.max(options.maxResponseChars, 8000)
@@ -813,9 +881,10 @@ export default function HomeView() {
     };
 
     const attempts = [
-      { maxItems: 20, maxResponseChars: 6000, includeConversation: true },
-      { maxItems: 12, maxResponseChars: 4000, includeConversation: false },
-      { maxItems: 6, maxResponseChars: 2000, includeConversation: false },
+      { maxItems: 20, maxResponseChars: 6000, includeFullConversation: true }, // Always try to preserve full convos
+      { maxItems: 12, maxResponseChars: 4000, includeFullConversation: true }, // Still preserve full convos
+      { maxItems: 8, maxResponseChars: 3000, includeFullConversation: true }, // Still preserve full convos
+      { maxItems: 6, maxResponseChars: 2000, includeFullConversation: false }, // Only fallback to no convos at extreme quota
     ];
 
     for (const attempt of attempts) {
@@ -849,11 +918,25 @@ export default function HomeView() {
 
   const scrollToMessage = useCallback((id: string) => {
     const node = userMessageRefs.current[id];
-    if (!node) {
+    const container = readScrollContainerRef.current;
+    
+    if (!node || !container) {
       pendingScrollUserIdRef.current = id;
       return;
     }
-    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Set flag to prevent Intersection Observer from interfering for 600ms
+    manualScrollUntilRef.current = Date.now() + 600;
+
+    // Scroll within the read container only, not the whole page
+    const nodeTop = node.offsetTop;
+    const nodeHeight = node.offsetHeight;
+    const containerHeight = container.clientHeight;
+    const targetScroll = nodeTop - (containerHeight / 2) + (nodeHeight / 2);
+
+    container.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    
+    // Update active request ID
     activeRequestIdRef.current = id;
     setActiveRequestId(id);
   }, []);
@@ -985,6 +1068,11 @@ export default function HomeView() {
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // Don't update if we're in manual scroll mode
+        if (Date.now() < manualScrollUntilRef.current) {
+          return;
+        }
+
         const visible = entries
           .filter((entry) => entry.isIntersecting)
           .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
@@ -1577,12 +1665,60 @@ export default function HomeView() {
     return withoutMetadata.trim();
   };
 
+  /**
+   * Clean excessive blank lines before tables, headings, and code blocks
+   * CRITICAL: Remove ALL spacing issues around markdown separators
+   */
+  const cleanExcessiveWhitespace = (text: string): string => {
+    // FIRST: Normalize table separators - remove spaces inside separator cells
+    // Convert "| --- | --- |" to "|---|---|" (no spaces in hyphens)
+    let cleaned = text.replace(/\|\s*-+\s*\|/g, '|---|');
+    // Fix edges
+    cleaned = cleaned.replace(/^\s*\|/gm, '|');
+    cleaned = cleaned.replace(/\|\s*$/gm, '|');
+    
+    // SECOND: Remove ALL newlines AROUND separators
+    // Before separators (any line with only |, dashes, and spaces)
+    cleaned = cleaned.replace(/\n+(?=\s*\|\s*[-|\s]+\|)/g, '\n');
+    // After separators
+    cleaned = cleaned.replace(/(\|\s*[-|\s]+\|)\n+/g, '$1\n');
+    
+    // THIRD: Remove ALL blank lines before pipes (table data rows)
+    cleaned = cleaned.replace(/\n\n+(?=\|[^\-])/g, '\n');
+    
+    // FOURTH: Collapse ALL excessive newlines (5+) to single newline
+    cleaned = cleaned.replace(/\n{5,}/g, '\n');
+    
+    // FIFTH: Remove blank lines before structural elements
+    // Before bold text or headings
+    cleaned = cleaned.replace(/\n\n+(?=\*\*|#{1,6}\s)/g, '\n');
+    
+    // Before code blocks
+    cleaned = cleaned.replace(/\n\n+(?=```)/g, '\n');
+    
+    // Before lists
+    cleaned = cleaned.replace(/\n\n+(?=[-*\+]\s)/g, '\n');
+    
+    // SIXTH: Remove triple+ newlines anywhere (allows max 1 blank line)
+    cleaned = cleaned.replace(/\n\n\n+/g, '\n\n');
+    
+    // SEVENTH: Remove leading/trailing whitespace
+    cleaned = cleaned.replace(/^\n+/, '').replace(/\n+$/, '');
+    
+    return cleaned;
+  };
+
   const getAssistantDisplayContent = (msg: ChatMessage) => {
     if (msg.role !== 'assistant') return msg.content;
-    if (!msg.animate) return msg.content;
-    if (completedTypewriterMap[msg.id]) return msg.content;
+    if (!msg.animate) {
+      // Clean excessive whitespace on static display
+      return cleanExcessiveWhitespace(msg.content);
+    }
+    if (completedTypewriterMap[msg.id]) {
+      return cleanExcessiveWhitespace(msg.content);
+    }
     if (typewriterState.messageId === msg.id) return typewriterState.text;
-    return msg.content;
+    return cleanExcessiveWhitespace(msg.content);
   };
 
   const buildSuggestionFallback = (query: string) => {
@@ -1654,8 +1790,8 @@ export default function HomeView() {
 
     const collectSuggestions = (raw: string) => {
       const normalized = raw
-        .replace(/^[-•\d\.)\s]+/, '')
-        .replace(/[\*_`~]/g, '')
+        .replace(/^[-•\d\.)\s]+/, '') // Remove leading numbers, dashes, bullets
+        .replace(/[\*_`~]/g, '') // Remove formatting
         .trim();
       if (!normalized) return;
 
@@ -1665,7 +1801,11 @@ export default function HomeView() {
         : [];
       const values = (pipeSplit.length > 1 ? pipeSplit : hyphenSplit.length > 1 ? hyphenSplit : [normalized]).slice(0, 6);
       values.forEach((value) => {
-        if (!suggestions.includes(value)) suggestions.push(value);
+        // Remove any leading numbers/dashes/bullets from individual suggestions
+        const cleanedValue = value.replace(/^[\d.):-]+\s*/, '').trim();
+        if (!suggestions.includes(cleanedValue) && cleanedValue.length > 0) {
+          suggestions.push(cleanedValue);
+        }
       });
     };
 
@@ -1839,6 +1979,7 @@ export default function HomeView() {
         audioBlob: undefined,
         modelUsed: resolvedModel || undefined,
         animate: interactionModeRef.current === "read",
+        referencesHtml: narrativeResponse.referencesHtml,
       };
 
       setMessages(prev => [...prev, assistantMsg]);
@@ -1849,6 +1990,7 @@ export default function HomeView() {
         suggestions: baseSuggestions,
         suggestion: baseSuggestions[0],
         modelUsed: resolvedModel || pendingHistoryItem.modelUsed,
+        referencesHtml: narrativeResponse.referencesHtml,
         conversation: [
           ...(pendingHistoryItem.conversation || []),
           { role: 'assistant', content: cleanedText, timestamp: new Date() },
@@ -2097,6 +2239,7 @@ export default function HomeView() {
         modelUsed: resolvedModel || existingItem?.modelUsed,
         voiceProfile,
         conversation: mergedConversation,
+        referencesHtml: narrativeResponse.referencesHtml,
       };
 
       upsertHistoryItem(historyItem);
@@ -2421,16 +2564,51 @@ export default function HomeView() {
           <span className="font-bold tracking-tight text-lg">Self \ Fles</span>
         </Link>
         
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col">
           <div className="flex items-center gap-2 mb-4 text-[var(--muted)] text-xs font-semibold uppercase tracking-widest">
             <HistoryIcon className="w-4 h-4" />
             <span>Neural History</span>
           </div>
-          <div className="space-y-1">
-            {history.length === 0 ? (
+
+          {/* NEW: History Tabs (Chat/Voice) */}
+          <div className="flex gap-2 mb-4 border-b border-[var(--border)] pb-2">
+            <button
+              onClick={() => setHistoryTab("all")}
+              className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                historyTab === "all"
+                  ? 'bg-[var(--foreground)] text-[var(--background)]'
+                  : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)]'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setHistoryTab("chat")}
+              className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                historyTab === "chat"
+                  ? 'bg-[var(--foreground)] text-[var(--background)]'
+                  : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)]'
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setHistoryTab("voice")}
+              className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                historyTab === "voice"
+                  ? 'bg-[var(--foreground)] text-[var(--background)]'
+                  : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)]'
+              }`}
+            >
+              Voice
+            </button>
+          </div>
+
+          <div className="space-y-1 flex-1 overflow-y-auto">
+            {filteredHistory.length === 0 ? (
               <p className="text-[var(--muted)] text-sm italic">No recent explorations</p>
             ) : (
-              history.map((item) => (
+              filteredHistory.map((item) => (
                 <div key={item.id} className="flex items-center gap-2">
                   <button
                     onClick={() => {
@@ -2543,16 +2721,51 @@ export default function HomeView() {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col">
                 <div className="flex items-center gap-2 mb-4 text-[var(--muted)] text-xs font-semibold uppercase tracking-widest">
                   <HistoryIcon className="w-4 h-4" />
                   <span>Neural History</span>
                 </div>
-                <div className="space-y-1">
-                  {history.length === 0 ? (
+
+                {/* Mobile History Tabs */}
+                <div className="flex gap-2 mb-4 border-b border-[var(--border)] pb-2 overflow-x-auto">
+                  <button
+                    onClick={() => setHistoryTab("all")}
+                    className={`px-3 py-1.5 rounded text-xs font-semibold transition-all whitespace-nowrap ${
+                      historyTab === "all"
+                        ? 'bg-[var(--foreground)] text-[var(--background)]'
+                        : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)]'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setHistoryTab("chat")}
+                    className={`px-3 py-1.5 rounded text-xs font-semibold transition-all whitespace-nowrap ${
+                      historyTab === "chat"
+                        ? 'bg-[var(--foreground)] text-[var(--background)]'
+                        : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)]'
+                    }`}
+                  >
+                    Chat
+                  </button>
+                  <button
+                    onClick={() => setHistoryTab("voice")}
+                    className={`px-3 py-1.5 rounded text-xs font-semibold transition-all whitespace-nowrap ${
+                      historyTab === "voice"
+                        ? 'bg-[var(--foreground)] text-[var(--background)]'
+                        : 'text-[var(--muted-strong)] hover:bg-[var(--surface-strong)]'
+                    }`}
+                  >
+                    Voice
+                  </button>
+                </div>
+
+                <div className="space-y-1 flex-1 overflow-y-auto">
+                  {filteredHistory.length === 0 ? (
                     <p className="text-[var(--muted)] text-sm italic">No recent explorations</p>
                   ) : (
-                    history.map((item) => (
+                    filteredHistory.map((item) => (
                       <div key={item.id} className="flex items-center gap-2">
                         <button
                           onClick={() => {
@@ -2684,33 +2897,48 @@ export default function HomeView() {
                         ) : (
                           displayContent
                         )}
-                      {msg.role === 'assistant' && (
-                        <button
-                          onClick={() => {
-                            if (msg.audioBlob) {
-                              handlePlayAudio(msg.audioBlob);
-                            } else {
-                              void handleNarrateReadMessage(msg);
-                            }
-                          }}
-                          className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-[var(--foreground)] text-[var(--background)] rounded-full text-xs font-bold hover:opacity-90 transition-colors"
-                        >
-                          <PlayIcon className="w-4 h-4" />
-                          Listen Narration
-                        </button>
-                      )}
                     </div>
-                    <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-2 uppercase tracking-tighter">
-                      {msg.role === 'assistant' ? 'Self \\ Fles' : 'You'} 
-                      <span>•</span>
-                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      {msg.role === 'assistant' && msg.modelUsed && (
-                        <>
+                    {msg.role === 'assistant' && (
+                      <>
+                        <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-3 uppercase tracking-tighter mt-2">
+                          <button
+                            onClick={() => {
+                              if (msg.audioBlob) {
+                                handlePlayAudio(msg.audioBlob);
+                              } else {
+                                void handleNarrateReadMessage(msg);
+                              }
+                            }}
+                            className="p-0.5 hover:text-[var(--foreground)] transition-colors"
+                            title="Listen to narration"
+                          >
+                            <VolumeIcon className="w-3.5 h-3.5" />
+                          </button>
+                          <span>Self \\ Fles</span>
                           <span>•</span>
-                          {getModelLabel(msg.modelUsed)}
-                        </>
-                      )}
-                    </div>
+                          <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          {msg.modelUsed && (
+                            <>
+                              <span>•</span>
+                              <span>{getModelLabel(msg.modelUsed)}</span>
+                            </>
+                          )}
+                        </div>
+                        {msg.referencesHtml && (
+                          <div className="mt-3 px-2">
+                            <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] mb-2">References</p>
+                            <div dangerouslySetInnerHTML={{ __html: msg.referencesHtml }} />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {isUser && (
+                      <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-2 uppercase tracking-tighter">
+                        You 
+                        <span>•</span>
+                        {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
                     </div>
                   </div>
                 );
@@ -2726,7 +2954,7 @@ export default function HomeView() {
                   </div>
                 </div>
               )}
-              {!isLoading && readSuggestions.length > 0 && (
+              {!isLoading && readSuggestions.length > 0 && userMessages.length < 10 && (
                 <div className="flex flex-col gap-2">
                   <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Suggested next</p>
                   <div className="flex flex-wrap gap-2">
@@ -2792,30 +3020,68 @@ export default function HomeView() {
         )}
 
         {interactionMode === "read" && userMessages.length > 0 && (
-          <div className="hidden lg:flex flex-col gap-2 fixed right-6 top-1/2 -translate-y-1/2 z-20">
-            {userMessages.map((msg, index) => {
-              const isActive = activeRequestId === msg.id;
-              return (
-                <button
-                  key={msg.id}
-                  type="button"
-                  onClick={() => scrollToMessage(msg.id)}
-                  className={`w-10 h-10 rounded-full border text-xs font-bold tracking-widest transition-all ${
-                    isActive
-                      ? 'bg-lime-400 text-black shadow-lg shadow-lime-500/30 border-transparent'
-                      : 'border-[var(--border)] text-[var(--muted)] hover:border-lime-300 hover:text-lime-200'
-                  }`}
-                  aria-label={`Jump to request ${index + 1}`}
-                >
-                  {String(index + 1).padStart(2, '0')}
-                </button>
-              );
-            })}
-          </div>
+          <>
+            {/* Numbered buttons - positioned 50px higher, responsive */}
+            <div className="flex flex-col justify-start gap-1 fixed right-2 sm:right-4 md:right-6 top-4 sm:top-6 md:top-8 z-20 max-h-[calc(100vh-250px)] overflow-y-auto pr-1 py-2">
+              {userMessages.slice(0, 10).map((msg, index) => {
+                const isActive = activeRequestId === msg.id;
+                return (
+                  <button
+                    key={msg.id}
+                    type="button"
+                    onClick={() => scrollToMessage(msg.id)}
+                    className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border text-[10px] sm:text-xs font-bold tracking-tight transition-all flex-shrink-0 ${
+                      isActive
+                        ? 'bg-[var(--foreground)] text-[var(--background)] shadow-lg shadow-[var(--foreground)]/30 border-transparent'
+                        : 'border-[var(--border)] text-[var(--muted)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]'
+                    }`}
+                    aria-label={`Jump to request ${index + 1}`}
+                    title={`Message ${index + 1}`}
+                  >
+                    {String(index + 1).padStart(2, '0')}
+                  </button>
+                );
+              })}
+            </div>
+            
+            {/* Limit reached overlay popup - appears at sticky footer bottom */}
+            {userMessages.length >= 10 && (
+              <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pointer-events-none">
+                <div className="pointer-events-auto w-full max-w-2xl bg-[var(--surface-strong)] border-t border-l border-r border-[var(--border)] rounded-t-2xl shadow-2xl p-4 md:p-6">
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="text-base md:text-lg font-bold text-[var(--foreground)]">
+                        🔒 Request Limit Reached
+                      </h3>
+                      <p className="text-xs md:text-sm text-[var(--muted)] mt-1">
+                        You've reached 10 conversation turns. Start a new chat to continue.
+                      </p>
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetMessageUiState();
+                        stopNarrationForUiChange();
+                        setMessages([]);
+                        setInputValue('');
+                        setReadSuggestions([]);
+                        setSelectedHistory(null);
+                        setSelectedHistoryId(null);
+                      }}
+                      className="w-full py-2 px-3 md:py-2.5 md:px-4 rounded-lg bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm md:text-base hover:opacity-90 transition-all"
+                    >
+                      ✨ Start New Chat
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {interactionMode === "read" && (
-          <div className="sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-3 md:p-8">
+          <div className={`sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-3 md:p-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
             <div className="max-w-3xl mx-auto">
               <form onSubmit={handleSubmit} className="relative group md:relative fixed bottom-0 left-0 right-0 md:static z-10 bg-[var(--background)] p-4 md:p-0 border-t md:border-t-0 border-[var(--border)]">
                 <div className="relative">
@@ -2843,10 +3109,11 @@ export default function HomeView() {
                     type="text"
                     value={inputValue}
                     onChange={(e) => { setInputValue(e.target.value); stopNarration(); }}
-                    placeholder="Ask a story, case, or question..."
+                    disabled={userMessages.length >= 10}
+                    placeholder={userMessages.length >= 10 ? "Limit reached - start new chat" : "Ask a story, case, or question..."}
                     className={`w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-3.5 pr-12 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-base placeholder-[var(--muted)] ${
                       messages.length > 0 ? 'pl-12' : 'pl-4'
-                    }`}
+                    } ${userMessages.length >= 10 ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
 
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
@@ -2930,7 +3197,15 @@ export default function HomeView() {
                     <p className="text-[11px] uppercase tracking-widest text-[var(--muted)] mb-2">{entry.role === 'user' ? 'You' : 'Narrator'}</p>
                     <div className="text-sm text-[var(--foreground)]">
                       {entry.role === 'assistant' ? (
-                        <span className="whitespace-pre-line">{sanitizeNarrationForDisplay(entry.content)}</span>
+                        <>
+                          <span className="whitespace-pre-line">{sanitizeNarrationForDisplay(entry.content)}</span>
+                          {selectedHistory.referencesHtml && index === getListenConversation(selectedHistory).filter(e => e.role === 'assistant').length - 1 && (
+                            <div className="mt-3">
+                              <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] mb-2">References</p>
+                              <div dangerouslySetInnerHTML={{ __html: selectedHistory.referencesHtml }} />
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <span className="whitespace-pre-line">{entry.content}</span>
                       )}

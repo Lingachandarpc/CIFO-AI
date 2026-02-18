@@ -1,11 +1,16 @@
 /**
- * Google Gemini Service with Web Search Integration
- * Fetches real-time web results via Tavily, then passes to Gemini for narration
+ * X.AI (Grok) Service with Web Search Integration
+ * Fetches real-time web results via Tavily, then passes to Grok for narration
  */
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const XAI_API_URL = 'https://api.x.ai/v1/chat/completions';
 const TAVILY_API_URL = 'https://api.tavily.com/search';
+const MODEL = 'grok-3';
+
+export interface XAIMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
 
 interface SearchResult {
   title: string;
@@ -32,7 +37,7 @@ async function fetchWebSearchResults(query: string): Promise<SearchResult[]> {
         query,
         include_answer: true,
         max_results: 5,
-        topic: 'news',
+        topic: 'news', // Always get latest news/updates
       }),
     });
 
@@ -127,11 +132,11 @@ export async function generateNarrativeWithWebSearch(
     };
     recentQueries?: string[];
   },
-  prefetchedWebResults?: SearchResult[] // NEW: Allow middleware to pass pre-fetched results
+  prefetchedWebResults?: Array<{title: string; url: string; content: string}> // NEW: Allow middleware to pass pre-fetched results
 ): Promise<{ narration: string; modelUsed: string }> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
-    return { narration: 'Gemini API key not configured', modelUsed: 'gemini' };
+    return { narration: 'X.AI API key not configured', modelUsed: 'xai' };
   }
 
   try {
@@ -235,7 +240,7 @@ export async function generateNarrativeWithWebSearch(
     if (needsLocation && !isRespondingToClarification) {
       return {
         narration: `To provide accurate ${/(weather|temperature|forecast)/.test(query.toLowerCase()) ? 'weather' : ''} information, could you please specify your location? For example: "weather in New York" or "temperature in London".`,
-        modelUsed: 'gemini'
+        modelUsed: 'xai'
       };
     }
 
@@ -317,79 +322,114 @@ Language: ${language}
 ${styleInstruction}
 ${enableWebSearch && searchContext ? '\nYou have been provided with current web search results. ALWAYS prioritize this information over your training data when there are discrepancies. If the query asks about current/recent information, use ONLY the web results provided.' : ''}`;
 
-    // Build contents array with conversation history
-    const contents = [];
-    
-    // Add system prompt as first user message
-    contents.push({
-      role: 'user',
-      parts: [{ text: systemPrompt }]
-    });
-    contents.push({
-      role: 'model',
-      parts: [{ text: 'Understood. I will create engaging narratives following these guidelines.' }]
-    });
+    const messages: XAIMessage[] = [
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
+    ];
 
     // Add chat history (last 5 messages)
     const recentHistory = chatHistory.slice(-5);
     for (const msg of recentHistory) {
-      contents.push({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }]
-      });
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({
+          role: msg.role,
+          content: msg.content,
+        });
+      }
     }
 
     // Add current query
-    contents.push({
+    messages.push({
       role: 'user',
-      parts: [{ text: listenModeInstructions }]
+      content: listenModeInstructions,
     });
 
-    const apiUrl = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const response = await fetch(apiUrl, {
+    const response = await fetch(XAI_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        contents,
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096,
-        },
+        model: MODEL,
+        messages,
+        temperature: 0.7,
+        max_tokens: 2000,
+        stream: false,
       }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      console.error('Gemini API error:', response.status, errorText);
+      const errorData = await response.text();
+      console.error('X.AI API error:', response.status, errorData);
       return { 
-        narration: 'Sorry — Gemini AI is unavailable right now.', 
-        modelUsed: 'gemini' 
+        narration: `X.AI error (${response.status}): Unable to generate narration`,
+        modelUsed: 'xai'
       };
     }
 
-    interface GeminiResponse {
-      candidates: Array<{
-        content: {
-          parts: Array<{
-            text: string;
-          }>;
+    interface XAIResponse {
+      choices: Array<{
+        message: {
+          content: string;
         };
       }>;
     }
 
-    const data = (await response.json()) as GeminiResponse;
-    const narration = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const data = (await response.json()) as XAIResponse;
+    const narration = data.choices?.[0]?.message?.content || '';
 
-    return { narration, modelUsed: 'gemini' };
+    if (!narration) {
+      return { 
+        narration: 'X.AI returned empty response',
+        modelUsed: 'xai'
+      };
+    }
+
+    return {
+      narration,
+      modelUsed: 'xai',
+    };
   } catch (error) {
-    console.error('Error generating narrative with Gemini:', error);
-    return { 
-      narration: 'Sorry — Gemini AI encountered an error.', 
-      modelUsed: 'gemini' 
+    console.error('Error calling X.AI with web search:', error);
+    return {
+      narration: 'Sorry — AI generation failed. Please try again.',
+      modelUsed: 'xai',
     };
   }
+}
+
+/**
+ * Generate narration with optional web search for any query
+ * Intelligently determines if web search is needed
+ */
+export async function generateNarrativeSmartSearch(
+  query: string,
+  narrationTime: number,
+  narrationType: string,
+  language: string,
+  interactionMode: 'read' | 'listen' = 'read'
+): Promise<{ narration: string; modelUsed: string }> {
+  // Determine if web search is needed based on query patterns
+  const webSearchKeywords = [
+    'today', 'latest', 'recent', 'news', 'current', 'now', '2026', '2025',
+    'update', 'breaking', 'happening', 'what is', 'how is', 'when did',
+    'recent developments', 'latest news', 'current events', 'this year',
+    'this month', 'this week', 'tomorrow', 'yesterday'
+  ];
+
+  const needsWebSearch = webSearchKeywords.some(keyword => 
+    query.toLowerCase().includes(keyword)
+  );
+
+  return generateNarrativeWithWebSearch(
+    query,
+    narrationTime,
+    narrationType,
+    language,
+    interactionMode,
+    needsWebSearch
+  );
 }
