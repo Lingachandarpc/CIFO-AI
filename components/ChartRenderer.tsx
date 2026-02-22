@@ -1,35 +1,40 @@
 'use client';
 
-import { useMemo } from 'react';
 import {
   LineChart,
   BarChart,
   PieChart,
   AreaChart,
+  RadialBarChart,
   Line,
   Bar,
   Pie,
   Area,
+  RadialBar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   Cell,
+  PolarAngleAxis,
   ResponsiveContainer,
   ComposedChart,
 } from 'recharts';
 
+type ChartDatum = Record<string, string | number>;
+type ChartWidth = number | `${number}%`;
+
 export interface ChartData {
-  type: 'line' | 'bar' | 'pie' | 'area' | 'composed';
-  data: any[];
+  type: 'line' | 'bar' | 'pie' | 'area' | 'composed' | 'radial';
+  data: ChartDatum[];
   xAxisKey?: string;
   yAxisKey?: string | string[];
   seriesKeys?: string[]; // For multi-series charts
   title?: string;
   options?: {
     height?: number;
-    width?: string;
+    width?: ChartWidth;
     showGrid?: boolean;
     showLegend?: boolean;
     showTooltip?: boolean;
@@ -47,10 +52,6 @@ const DEFAULT_COLORS = [
   '#06b6d4', // cyan
   '#f97316', // orange
 ];
-
-function getChartColor(index: number): string {
-  return DEFAULT_COLORS[index % DEFAULT_COLORS.length];
-}
 
 /**
  * Parse chart JSON from markdown code blocks
@@ -78,7 +79,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
   const {
     height = 300,
-    width = '100%',
+    width = '100%' as ChartWidth,
     showGrid = true,
     showLegend = true,
     showTooltip = true,
@@ -87,14 +88,14 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
   if (!data || data.length === 0) {
     return (
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-center text-sm text-[var(--muted)]">
+      <div className="rounded-lg border border-(--border) bg-(--surface) p-4 text-center text-sm text-(--muted)">
         No data available for chart
       </div>
     );
   }
 
-  const containerProps = {
-    width: '100%' as any,
+  const containerProps: { width: ChartWidth; height: number } = {
+    width,
     height: height + 40,
   };
 
@@ -102,8 +103,8 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
     switch (type) {
       case 'line':
         return (
-          <div className="my-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-            {title && <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">{title}</h4>}
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+            {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                 {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />}
@@ -120,14 +121,14 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
                     <Line
                       key={key}
                       type="monotone"
-                      dataKey={key as any}
+                      dataKey={key}
                       stroke={colors[idx % colors.length]}
                       dot={false}
                       strokeWidth={2}
                     />
                   ))
                 ) : (
-                  <Line type="monotone" dataKey={(yAxisKey || 'value') as any} stroke={colors[0]} strokeWidth={2} />
+                  <Line type="monotone" dataKey={yAxisKey || 'value'} stroke={colors[0]} strokeWidth={2} />
                 )}
               </LineChart>
             </ResponsiveContainer>
@@ -136,8 +137,8 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
       case 'bar':
         return (
-          <div className="my-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-            {title && <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">{title}</h4>}
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+            {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <BarChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                 {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />}
@@ -151,10 +152,10 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
                 {showLegend && <Legend />}
                 {Array.isArray(yAxisKey) ? (
                   yAxisKey.map((key, idx) => (
-                    <Bar key={key} dataKey={key as any} fill={colors[idx % colors.length]} />
+                    <Bar key={key} dataKey={key} fill={colors[idx % colors.length]} />
                   ))
                 ) : (
-                  <Bar dataKey={(yAxisKey || 'value') as any} fill={colors[0]} />
+                  <Bar dataKey={yAxisKey || 'value'} fill={colors[0]} />
                 )}
               </BarChart>
             </ResponsiveContainer>
@@ -163,8 +164,8 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
       case 'area':
         return (
-          <div className="my-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-            {title && <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">{title}</h4>}
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+            {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <AreaChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                 {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />}
@@ -181,14 +182,14 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
                     <Area
                       key={key}
                       type="monotone"
-                      dataKey={key as any}
+                      dataKey={key}
                       fill={colors[idx % colors.length]}
                       stroke={colors[idx % colors.length]}
                       fillOpacity={0.6}
                     />
                   ))
                 ) : (
-                  <Area type="monotone" dataKey={(yAxisKey || 'value') as any} fill={colors[0]} stroke={colors[0]} fillOpacity={0.6} />
+                  <Area type="monotone" dataKey={yAxisKey || 'value'} fill={colors[0]} stroke={colors[0]} fillOpacity={0.6} />
                 )}
               </AreaChart>
             </ResponsiveContainer>
@@ -198,13 +199,13 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
       case 'pie':
         const pieDataKey = Array.isArray(yAxisKey) ? (yAxisKey[0] || 'value') : (yAxisKey || 'value');
         return (
-          <div className="my-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-            {title && <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">{title}</h4>}
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+            {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <PieChart>
                 <Pie
                   data={data}
-                  dataKey={pieDataKey as any}
+                  dataKey={pieDataKey}
                   nameKey={xAxisKey || 'name'}
                   cx="50%"
                   cy="50%"
@@ -222,11 +223,52 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
           </div>
         );
 
+      case 'radial':
+        const radialDataKey = Array.isArray(yAxisKey)
+          ? (yAxisKey[0] || 'value')
+          : (yAxisKey || seriesKeys?.[0] || 'value');
+        return (
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+            {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
+            <ResponsiveContainer {...containerProps}>
+              <RadialBarChart
+                data={data}
+                cx="50%"
+                cy="50%"
+                innerRadius="20%"
+                outerRadius="90%"
+                barSize={18}
+              >
+                <PolarAngleAxis type="number" domain={[0, 'dataMax']} tick={false} />
+                <RadialBar
+                  dataKey={radialDataKey}
+                  background={{ fill: 'var(--surface-strong)' }}
+                  cornerRadius={8}
+                  label={{ fill: 'var(--foreground)', position: 'insideStart', fontSize: 11 }}
+                >
+                  {data.map((_, idx) => (
+                    <Cell key={`radial-cell-${idx}`} fill={colors[idx % colors.length]} />
+                  ))}
+                </RadialBar>
+                {showTooltip && (
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'var(--surface-strong)',
+                      border: '1px solid var(--border)',
+                    }}
+                  />
+                )}
+                {showLegend && <Legend />}
+              </RadialBarChart>
+            </ResponsiveContainer>
+          </div>
+        );
+
       case 'composed':
         // Composed chart for multi-series with mixed types
         return (
-          <div className="my-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-            {title && <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">{title}</h4>}
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+            {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <ComposedChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                 {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />}
@@ -239,7 +281,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
                 {showTooltip && <Tooltip contentStyle={{ backgroundColor: 'var(--surface-strong)', border: '1px solid var(--border)' }} />}
                 {showLegend && <Legend />}
                 {seriesKeys?.map((key, idx) => (
-                  <Bar key={`bar-${key}`} dataKey={key as any} fill={colors[idx % colors.length]} />
+                  <Bar key={`bar-${key}`} dataKey={key} fill={colors[idx % colors.length]} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
@@ -248,7 +290,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
       default:
         return (
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-center text-sm text-[var(--muted)]">
+          <div className="rounded-lg border border-(--border) bg-(--surface) p-4 text-center text-sm text-(--muted)">
             Unknown chart type: {type}
           </div>
         );
@@ -256,7 +298,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
   } catch (error) {
     console.error('Chart rendering error:', error);
     return (
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-center text-sm text-red-500">
+      <div className="rounded-lg border border-(--border) bg-(--surface) p-4 text-center text-sm text-red-500">
         Error rendering chart
       </div>
     );

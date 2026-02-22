@@ -194,34 +194,37 @@ export async function generateNarrativeWithWebSearch(
   \`\`\`
   Chart types: "line" (trends), "bar" (comparisons), "pie" (proportions), "area" (cumulative)
   Use charts for: growth trends, statistical comparisons, market data, performance metrics, time series
-- **Tables**: Include Markdown tables when comparing features, data, or organizing information. Highly recommended for Educational content.
-  CRITICAL FORMAT RULE - TABLE SYNTAX:
-  ✅ CORRECT: 
-    | Header A | Header B |
-    |----------|----------|
-    | Data 1   | Data 2   |
-  ❌ WRONG (separator with newlines): Do NOT split |---| separator across multiple lines
-  SEPARATOR ROW MUST BE: |----------|----------|  on SINGLE LINE ONLY with no newlines inside
+- **Tables**: Use fenced code block labeled \`table\` (NO markdown pipe tables). Preferred JSON format:
+  \`\`\`table
+  {
+    "title": "Comparison",
+    "columns": ["Aspect", "Option A", "Option B"],
+    "rows": [["Speed", "Fast", "Medium"], ["Cost", "High", "Low"]]
+  }
+  \`\`\`
 - **Text Illustrations**: For processes, architectures, steps, or procedures, use text-based diagrams in code blocks labeled \`diagram\`. NO blank lines before code blocks.
-- **Tabs**: Use tabbed sections for organizing distinct but related concepts. Format in code block:
+- **Tabs**: Use tabbed sections in code block labeled \`tabs\`:
   \`\`\`tabs
   Tab: Label 1
   Content for first tab goes here
   Tab: Label 2
   Content for second tab goes here
   \`\`\`
-  Each tab starts with "Tab: LabelName" on its own line
-- **Sliders**: Use slider blocks to visualize scales, spectrums, or ratings when relevant.
+  Each tab starts with "Tab: LabelName" on its own line.
+- **Progress**: Use code block labeled \`progress\` for scales/ratings:
+  \`\`\`progress
+  label: Readiness
+  value: 7/10
+  left: Low
+  right: High
+  \`\`\`
+- **Games (Nanobot)**: If the user asks to play a game, says they are bored, or requests fun activities, include a playable game block:
+  \`\`\`game
+  {"type":"tic_tac_toe","title":"Tic-Tac-Toe","description":"Play directly in chat"}
+  \`\`\`
+  Allowed game types: \`tic_tac_toe\`, \`target_tap\`, \`number_hunt\`, \`memory_flip\`. If the user asks an unsupported game, suggest these available games.
 - **Structure**: Use **bold headings** to break content into scannable sections. NO blank lines between headings and their content.
-- **WHITESPACE VIOLATION - NEVER DO THIS**:
-  ❌ "Some text.\n\n\n\n\n**Heading**\n\n\n\n\n| Table" (causes huge gaps)
-  ❌ "Text.\n  \n  \n  \n| table" (multiple empty lines = GAP)
-  ❌ "Text.\n\n\n**Next**" (triple newline before heading)
-- **CORRECT WHITESPACE PATTERN**:
-  ✅ "Explanation text.\n\n**Table Title**\n| Col | Col |\n|---|---|\n| data | data |\n\n**Next Section**\nContent here"
-  ✅ "Text.\n**Heading**\nContent" (SINGLE newline only)
-  ✅ Maximum ONE blank line between major sections - NEVER more than one
-- **DO NOT USE**: Multiple consecutive newlines (\\n\\n\\n...) before any structural element
+- **DO NOT USE**: Markdown pipe table syntax (\`|\`, \`---\`) and multiple consecutive newlines (\\n\\n\\n...).
 `
       : '';
 

@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import type { Prisma } from "@prisma/client";
 import { authOptions } from "../../../services/authOptions";
 import prisma from "../../../../lib/prisma";
 import {
@@ -103,8 +104,6 @@ function extractProfileFromHistory(
   const pulseTraits: string[] = [];
   
   for (const msg of userMessages) {
-    const lower = msg.toLowerCase();
-    
     // Personality descriptors: "I am creative", "I'm passionate about", "I love learning"
     const personalityPatterns = [
       /(?:i am|i'm|im)\s+(creative|curious|analytical|passionate|enthusiastic|dedicated|motivated|ambitious|hardworking|friendly|outgoing|introverted|extroverted|optimistic|pessimistic|adventurous|cautious|spontaneous|organized)/i,
@@ -307,8 +306,8 @@ export async function POST(req: Request) {
           
           if (user) {
             // Build update data - only include fields that were extracted
-            const updateData: any = {};
-            const createData: any = { userId: user.id };
+            const updateData: Prisma.UserProfileUpdateInput = {};
+            const createData: Prisma.UserProfileUncheckedCreateInput = { userId: user.id };
             
             if (extractedProfile?.location) {
               updateData.location = extractedProfile.location;

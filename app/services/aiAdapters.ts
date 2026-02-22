@@ -195,6 +195,23 @@ export async function openaiAdapter(
   const helpfulnessGuideline = '\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n1. NEVER EVER say "I don\'t have access to real-time data" or "I can\'t check the information" or "Check a news website"\n2. When you see **Current Time**: [time] in the context below, that IS the real current time - USE IT DIRECTLY\n3. When you see web search results below, PRIORITIZE information from trusted local news sources (BBC, Reuters, AP News, country-specific outlets)\n4. For location-specific queries (movies, news, events, doomsday predictions): First verify the location context, then provide location-relevant information\n5. For time questions: State the EXACT time shown in **Current Time**: field. Example: "It\'s currently 9:57 PM IST in Chennai"\n6. For time-contextual questions ("is it good time for coffee?"): First state the current time from **Current Time**: field, then give recommendation\n7. For news/current events: Use web search data from trusted sources and prioritize region-specific outlets over general ones\n8. ALWAYS be solution-oriented and helpful - provide actual answers with sources, not excuses\n9. Location Context: If user is in specific region (India, USA, Tamil Nadu), validate that results are relevant to that location. If results are global/irrelevant, state ONLY verified local information\n\nTypical schedules for context: coffee good in morning (6am-11am), lunch around noon-2pm, dinner 6pm-9pm, sleep 9pm-6am';
 
   const isListenMode = options.interactionMode === 'listen';
+  const readModeComponentGuide = !isListenMode
+    ? `
+Read mode component formatting contract:
+- Do NOT use markdown pipe tables or separator rows.
+- For tables, use fenced code blocks labeled \`table\` using JSON:
+  \`\`\`table
+  {"title":"Comparison","columns":["Aspect","A","B"],"rows":[["Speed","Fast","Medium"],["Cost","High","Low"]]}
+  \`\`\`
+- For tabbed content, use fenced code blocks labeled \`tabs\` with lines that start as: \`Tab: Label\`.
+- For ratings/scales, use fenced code blocks labeled \`progress\` with keys: label, value, left, right.
+- If user asks to play games, says they are bored, or requests fun activity, include a fenced \`game\` block with JSON like:
+  \`\`\`game
+  {"type":"tic_tac_toe","title":"Tic-Tac-Toe","description":"Play directly in chat"}
+  \`\`\`
+  Allowed game types: \`tic_tac_toe\`, \`target_tap\`, \`number_hunt\`, \`memory_flip\`. If requested game is unsupported, suggest these available games.
+`
+    : '';
   const userInstructions = isListenMode
     ? `
 Answer the user's question directly:
@@ -232,6 +249,7 @@ Instructions:
 - Use minimal formatting: headings in **bold**, bullet lists where helpful
 - Only include tables or diagrams when they significantly enhance understanding
 - Structure content with clear **Section Headings** for readability
+${readModeComponentGuide}
 ${webContext ? '- IMPORTANT: Use the current information from the web provided below to ensure accuracy and relevance. Prioritize this over general knowledge when there are discrepancies.' : ''}
 ${webContext}
 - End with a complete closing sentence, then add this final line:

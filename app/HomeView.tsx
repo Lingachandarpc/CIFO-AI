@@ -14,9 +14,115 @@ import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import ChartRenderer, { parseChartJson, type ChartData } from '../components/ChartRenderer';
+import ChartRenderer, { type ChartData } from '../components/ChartRenderer';
+import NanobotCanvas from '../components/NanobotCanvas';
+import NanobotGame, { type GameConfig } from '../components/NanobotGame';
 
 type TabsBlock = { label: string; content: string };
+type TableBlock = { title?: string; columns: string[]; rows: string[][] };
+
+const AVAILABLE_GAMES = [
+  { key: 'tic_tac_toe', label: 'Tic-Tac-Toe' },
+  { key: 'snake', label: 'Snake' },
+  { key: 'target_tap', label: 'Target Tap' },
+  { key: 'number_hunt', label: 'Number Hunt' },
+  { key: 'memory_flip', label: 'Memory Flip' },
+] as const;
+
+const detectRequestedGame = (query: string): GameConfig['type'] | null => {
+  const lowered = query.toLowerCase();
+  if (lowered.includes('tic tac toe') || lowered.includes('tictactoe') || lowered.includes('tic-tac-toe')) {
+    return 'tic_tac_toe';
+  }
+  if (lowered.includes('snake')) {
+    return 'snake';
+  }
+  if (lowered.includes('target') || lowered.includes('tap game') || lowered.includes('reaction')) {
+    return 'target_tap';
+  }
+  if (lowered.includes('number') || lowered.includes('hunt')) {
+    return 'number_hunt';
+  }
+  if (lowered.includes('memory') || lowered.includes('match card') || lowered.includes('flip card')) {
+    return 'memory_flip';
+  }
+  return null;
+};
+
+const detectDifficulty = (query: string): NonNullable<GameConfig['difficulty']> => {
+  const lowered = query.toLowerCase();
+  if (/(hard|expert|difficult)/.test(lowered)) return 'hard';
+  if (/(easy|beginner|simple)/.test(lowered)) return 'easy';
+  return 'medium';
+};
+
+const isGameIntent = (query: string) => {
+  const lowered = query.toLowerCase();
+  return /(game|play|bored|fun|mini game|minigame)/.test(lowered);
+};
+
+const hasGameBlock = (text: string) => /```game[\s\S]*?```/i.test(text);
+
+const buildLocalGameResponse = (query: string) => {
+  const selected = detectRequestedGame(query);
+  const difficulty = detectDifficulty(query);
+  const catalog = AVAILABLE_GAMES.map((item) => item.label).join(', ');
+  const suggestions = [
+    'Play Tic-Tac-Toe (Easy)',
+    'Play Snake (Medium)',
+    'Play Snake (Hard)',
+    'Play Memory Flip',
+  ];
+
+  if (!selected) {
+    return {
+      content: `What type of game do you want to play?\n\nAvailable games: ${catalog}.\n\nReply with a game name and optional difficulty (easy / medium / hard).`,
+      suggestions,
+    };
+  }
+
+  const title = AVAILABLE_GAMES.find((item) => item.key === selected)?.label || 'Nanobot Game';
+  const isDifficultyGame = selected === 'tic_tac_toe' || selected === 'snake';
+  const description = selected === 'snake'
+    ? 'Use arrow keys or on-screen controls.'
+    : selected === 'tic_tac_toe'
+      ? 'Beat Nanobot on the board.'
+      : 'Tap Reset to start.';
+
+  const config = {
+    type: selected,
+    title,
+    description,
+    ...(isDifficultyGame ? { difficulty } : {}),
+  };
+
+  return {
+    content: `\
+\
+\
+\`\`\`game
+${JSON.stringify(config)}
+\`\`\``,
+    suggestions,
+  };
+};
+
+const appendGameSuggestionBlock = (text: string, query: string, interactionMode: 'read' | 'listen') => {
+  if (interactionMode !== 'read') return text;
+  if (!isGameIntent(query)) return text;
+  if (hasGameBlock(text)) return text;
+
+  const selected = detectRequestedGame(query) || 'tic_tac_toe';
+  const catalog = AVAILABLE_GAMES.map((item) => item.label).join(' • ');
+  const unknownSpecific = /chess|sudoku|crossword|2048|pong|flappy|ludo|carrom/.test(query.toLowerCase())
+    && !AVAILABLE_GAMES.some((item) => query.toLowerCase().includes(item.label.toLowerCase()));
+
+  const recommendation = unknownSpecific
+    ? `\n\n**Available games right now:** ${catalog}.`
+    : '';
+
+  return `${text.trim()}${recommendation}\n\n**Play in chat:**\n\`\`\`game\n{"type":"${selected}","title":"${AVAILABLE_GAMES.find((item) => item.key === selected)?.label || 'Nanobot Game'}","description":"Tap Reset to start."}\n\`\`\``;
+};
 
 const parseTabsBlock = (raw: string): TabsBlock[] => {
   const lines = raw.split(/\r?\n/);
@@ -24,14 +130,12 @@ const parseTabsBlock = (raw: string): TabsBlock[] => {
   let current: TabsBlock | null = null;
 
   lines.forEach((line) => {
-    // Match: "Tab: Label" or "**Tab ...: Label**" or "**Tab: Label**" formats
-    const match = line.match(/^[\*]*\s*Tab[\*]*\s*[\:\s]+(.+?)[\*]*\s*$/i) || 
-                  line.match(/^[\*\*]+\s*(.+?)\s*[\*\*]+\s*$/i);
-    
-    if (match && (line.toLowerCase().includes('tab') || line.includes('**'))) {
+    // Match only explicit tab declarations to avoid false positives from regular bold markdown
+    const match = line.match(/^\s*(?:\*\*)?\s*Tab\s*:\s*(.+?)\s*(?:\*\*)?\s*$/i);
+
+    if (match) {
       if (current) tabs.push(current);
       let label = match[1].trim();
-      // Clean up label - remove markdown formatting
       label = label.replace(/\*\*/g, '').replace(/^tab[\s:]+/i, '').trim();
       current = { label: label || 'Tab', content: '' };
       return;
@@ -93,16 +197,148 @@ const TabsBlockView = ({ raw }: { raw: string }) => {
   );
 };
 
-const SliderBlockView = ({ raw }: { raw: string }) => {
+const parseTableBlock = (raw: string): TableBlock | null => {
+  try {
+    const parsed = JSON.parse(raw) as {
+      title?: string;
+      columns?: string[];
+      rows?: Array<string[] | Record<string, string | number | boolean | null | undefined>>;
+    };
+
+    if (Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) {
+      const rows = parsed.rows.map((row) => {
+        if (Array.isArray(row)) return row.map((value) => String(value ?? ''));
+        return parsed.columns!.map((key) => String((row as Record<string, unknown>)?.[key] ?? ''));
+      });
+      return {
+        title: parsed.title,
+        columns: parsed.columns.map((col) => String(col)),
+        rows,
+      };
+    }
+  } catch {
+  }
+
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let title = '';
+  let columns: string[] = [];
+  const rows: string[][] = [];
+
+  lines.forEach((line) => {
+    const lower = line.toLowerCase();
+    if (lower.startsWith('title:')) {
+      title = line.split(':').slice(1).join(':').trim();
+      return;
+    }
+    if (lower.startsWith('columns:')) {
+      columns = line
+        .split(':')
+        .slice(1)
+        .join(':')
+        .split(/[;,]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      return;
+    }
+    if (lower.startsWith('row:')) {
+      const row = line
+        .split(':')
+        .slice(1)
+        .join(':')
+        .split(/[;,]/)
+        .map((item) => item.trim());
+      if (row.length) rows.push(row);
+    }
+  });
+
+  if (!columns.length || !rows.length) return null;
+
+  const normalizedRows = rows.map((row) =>
+    Array.from({ length: columns.length }, (_, index) => row[index] ?? '')
+  );
+
+  return {
+    title: title || undefined,
+    columns,
+    rows: normalizedRows,
+  };
+};
+
+const TableBlockView = ({ raw }: { raw: string }) => {
+  const parsed = useMemo(() => parseTableBlock(raw), [raw]);
+
+  if (!parsed) {
+    return (
+      <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
+        {raw}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+      {parsed.title && <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">{parsed.title}</p>}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border)]">
+              {parsed.columns.map((column) => (
+                <th key={column} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-strong)]">
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {parsed.rows.map((row, rowIndex) => (
+              <tr key={`${row.join('-')}-${rowIndex}`} className="border-b border-[var(--border)] last:border-b-0">
+                {row.map((cell, cellIndex) => (
+                  <td key={`${cell}-${cellIndex}`} className="px-3 py-2 text-[var(--foreground)]">
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const ProgressBlockView = ({ raw }: { raw: string }) => {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let json: {
+    label?: string;
+    value?: number | string;
+    max?: number;
+    left?: string;
+    right?: string;
+  } | null = null;
+
+  try {
+    json = JSON.parse(raw) as {
+      label?: string;
+      value?: number | string;
+      max?: number;
+      left?: string;
+      right?: string;
+    };
+  } catch {
+    json = null;
+  }
+
   const getValue = (key: string) => {
     const match = lines.find((line) => line.toLowerCase().startsWith(`${key}:`));
     return match ? match.split(':').slice(1).join(':').trim() : '';
   };
-  const label = getValue('label') || 'Signal';
-  const valueText = getValue('value') || '5/10';
-  const left = getValue('left') || 'Low';
-  const right = getValue('right') || 'High';
+  const label = json?.label || getValue('label') || 'Signal';
+  const valueText =
+    json?.value !== undefined
+      ? `${json.value}${json?.max ? `/${json.max}` : ''}`
+      : getValue('value') || '5/10';
+  const left = json?.left || getValue('left') || 'Low';
+  const right = json?.right || getValue('right') || 'High';
 
   const numericMatch = valueText.match(/(\d+(?:\.\d+)?)/);
   const numericValue = numericMatch ? Number(numericMatch[1]) : 5;
@@ -131,6 +367,50 @@ const SliderBlockView = ({ raw }: { raw: string }) => {
   );
 };
 
+const parseGameBlock = (raw: string): GameConfig | null => {
+  try {
+    const parsed = JSON.parse(raw) as Partial<GameConfig>;
+    if (parsed.type === 'tic_tac_toe' || parsed.type === 'snake' || parsed.type === 'target_tap' || parsed.type === 'number_hunt' || parsed.type === 'memory_flip') {
+      return {
+        type: parsed.type,
+        title: parsed.title,
+        description: parsed.description,
+        difficulty: parsed.difficulty,
+      };
+    }
+  } catch {
+  }
+
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const read = (key: string) => {
+    const line = lines.find((item) => item.toLowerCase().startsWith(`${key}:`));
+    return line ? line.split(':').slice(1).join(':').trim() : '';
+  };
+  const type = read('type').toLowerCase();
+  if (type !== 'tic_tac_toe' && type !== 'snake' && type !== 'target_tap' && type !== 'number_hunt' && type !== 'memory_flip') return null;
+  const difficulty = read('difficulty');
+
+  return {
+    type,
+    title: read('title') || undefined,
+    description: read('description') || undefined,
+    difficulty: difficulty === 'easy' || difficulty === 'medium' || difficulty === 'hard' ? difficulty : undefined,
+  } as GameConfig;
+};
+
+const GameBlockView = ({ raw }: { raw: string }) => {
+  const config = useMemo(() => parseGameBlock(raw), [raw]);
+  if (!config) {
+    return (
+      <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
+        {raw}
+      </pre>
+    );
+  }
+
+  return <NanobotGame config={config} />;
+};
+
 const RichMarkdown = ({ content }: { content: string }) => (
   <ReactMarkdown
     remarkPlugins={[remarkGfm]}
@@ -141,8 +421,24 @@ const RichMarkdown = ({ content }: { content: string }) => (
         const raw = String(children).trim();
         const isInline = !className;
 
+        if (!isInline && language === 'progress') {
+          return <ProgressBlockView raw={raw} />;
+        }
+
         if (!isInline && language === 'slider') {
-          return <SliderBlockView raw={raw} />;
+          return <ProgressBlockView raw={raw} />;
+        }
+
+        if (!isInline && language === 'tabs') {
+          return <TabsBlockView raw={raw} />;
+        }
+
+        if (!isInline && language === 'table') {
+          return <TableBlockView raw={raw} />;
+        }
+
+        if (!isInline && language === 'game') {
+          return <GameBlockView raw={raw} />;
         }
 
         if (!isInline && language === 'diagram') {
@@ -1670,26 +1966,12 @@ export default function HomeView() {
    * CRITICAL: Remove ALL spacing issues around markdown separators
    */
   const cleanExcessiveWhitespace = (text: string): string => {
-    // FIRST: Normalize table separators - remove spaces inside separator cells
-    // Convert "| --- | --- |" to "|---|---|" (no spaces in hyphens)
-    let cleaned = text.replace(/\|\s*-+\s*\|/g, '|---|');
-    // Fix edges
-    cleaned = cleaned.replace(/^\s*\|/gm, '|');
-    cleaned = cleaned.replace(/\|\s*$/gm, '|');
-    
-    // SECOND: Remove ALL newlines AROUND separators
-    // Before separators (any line with only |, dashes, and spaces)
-    cleaned = cleaned.replace(/\n+(?=\s*\|\s*[-|\s]+\|)/g, '\n');
-    // After separators
-    cleaned = cleaned.replace(/(\|\s*[-|\s]+\|)\n+/g, '$1\n');
-    
-    // THIRD: Remove ALL blank lines before pipes (table data rows)
-    cleaned = cleaned.replace(/\n\n+(?=\|[^\-])/g, '\n');
-    
-    // FOURTH: Collapse ALL excessive newlines (5+) to single newline
+    let cleaned = text;
+
+    // Collapse ALL excessive newlines (5+) to single newline
     cleaned = cleaned.replace(/\n{5,}/g, '\n');
     
-    // FIFTH: Remove blank lines before structural elements
+    // Remove blank lines before structural elements
     // Before bold text or headings
     cleaned = cleaned.replace(/\n\n+(?=\*\*|#{1,6}\s)/g, '\n');
     
@@ -1699,10 +1981,10 @@ export default function HomeView() {
     // Before lists
     cleaned = cleaned.replace(/\n\n+(?=[-*\+]\s)/g, '\n');
     
-    // SIXTH: Remove triple+ newlines anywhere (allows max 1 blank line)
+    // Remove triple+ newlines anywhere (allows max 1 blank line)
     cleaned = cleaned.replace(/\n\n\n+/g, '\n\n');
     
-    // SEVENTH: Remove leading/trailing whitespace
+    // Remove leading/trailing whitespace
     cleaned = cleaned.replace(/^\n+/, '').replace(/\n+$/, '');
     
     return cleaned;
@@ -1899,7 +2181,6 @@ export default function HomeView() {
     }
     const requestTimestamp = new Date();
     setInputValue('');
-    setIsLoading(true);
 
     const newUserMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -1945,6 +2226,51 @@ export default function HomeView() {
       }).catch((error) => console.error('Error saving user message:', error));
     }
 
+    if (interactionModeRef.current === 'read' && isGameIntent(userQuery)) {
+      const localGame = buildLocalGameResponse(userQuery);
+      const assistantContent = localGame.content.trim();
+      const assistantTimestamp = new Date();
+      const assistantMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: assistantContent,
+        timestamp: assistantTimestamp,
+        animate: true,
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+
+      const updatedHistoryItem: HistoryItem = {
+        ...pendingHistoryItem,
+        response: assistantContent,
+        suggestions: localGame.suggestions,
+        suggestion: localGame.suggestions[0],
+        conversation: [
+          ...(pendingHistoryItem.conversation || []),
+          { role: 'assistant', content: assistantContent, timestamp: assistantTimestamp },
+        ],
+      };
+      upsertHistoryItem(updatedHistoryItem);
+      setReadSuggestions(localGame.suggestions);
+
+      if (isAuthenticated) {
+        fetch('/api/chronoread/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: 'assistant',
+            content: assistantContent,
+            mode: currentMode === SearchMode.BOOK ? 'BOOK' : 'CASE_STUDY',
+            audioBlob: null,
+          }),
+        }).catch((error) => console.error('Error saving game assistant message:', error));
+      }
+
+      return;
+    }
+
+    setIsLoading(true);
+
     try {
       const chatHistory = [...messages.slice(-5), newUserMsg].map(m => ({ role: m.role, content: m.content }));
       const narrativeResponse = await generateNarrative(
@@ -1966,7 +2292,8 @@ export default function HomeView() {
         }
       }
 
-      const { cleanedText, suggestions } = parseResponseMetadata(narrativeResponse.narration);
+      const narrationWithGames = appendGameSuggestionBlock(narrativeResponse.narration, userQuery, 'read');
+      const { cleanedText, suggestions } = parseResponseMetadata(narrationWithGames);
       const baseSuggestions = suggestions.slice(0, 3);
       
       const audioBase64 = '';
@@ -2178,7 +2505,8 @@ export default function HomeView() {
         }
       }
 
-      const { cleanedText, voiceProfile } = parseResponseMetadata(narrativeResponse.narration);
+      const narrationWithGames = appendGameSuggestionBlock(narrativeResponse.narration, transcript, 'listen');
+      const { cleanedText, voiceProfile } = parseResponseMetadata(narrationWithGames);
       const genre = voiceProfile.genre;
       lastNarrationRef.current = cleanedText;
 
@@ -2854,7 +3182,7 @@ export default function HomeView() {
         )}
 
         {interactionMode === "read" ? (
-          <div className="flex-1 overflow-y-auto px-3 md:px-0 scroll-smooth pb-28 md:pb-10" ref={readScrollContainerRef}>
+          <div className="flex-1 overflow-y-auto pl-3 pr-14 sm:pl-4 sm:pr-16 md:px-0 scroll-smooth pb-28 md:pb-10" ref={readScrollContainerRef}>
             <div className="max-w-3xl mx-auto py-8 md:py-10 space-y-8">
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
@@ -2874,8 +3202,9 @@ export default function HomeView() {
                 </div>
               )}
 
-              {messages.map((msg) => {
+              {messages.map((msg, index) => {
                 const isUser = msg.role === 'user';
+                const isLatestMessage = index === messages.length - 1;
                 const displayContent = isUser ? msg.content : getAssistantDisplayContent(msg);
                 return (
                   <div
@@ -2890,6 +3219,11 @@ export default function HomeView() {
                           ? 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)]'
                           : 'bg-transparent text-[var(--foreground)] whitespace-pre-line'
                       }`}>
+                        {msg.role === 'assistant' && interactionMode === 'read' && settings.narrationType === 'Realistic' && isLatestMessage && !hasGameBlock(displayContent) && (
+                          <div className="mb-3">
+                            <NanobotCanvas isActive={isLoading} />
+                          </div>
+                        )}
                         {msg.role === 'assistant' ? (
                           <div className="prose prose-sm max-w-none dark:prose-invert">
                             <RichMarkdown content={sanitizeNarrationForDisplay(displayContent)} />
@@ -3022,7 +3356,7 @@ export default function HomeView() {
         {interactionMode === "read" && userMessages.length > 0 && (
           <>
             {/* Numbered buttons - positioned 50px higher, responsive */}
-            <div className="flex flex-col justify-start gap-1 fixed right-2 sm:right-4 md:right-6 top-4 sm:top-6 md:top-8 z-20 max-h-[calc(100vh-250px)] overflow-y-auto pr-1 py-2">
+            <div className="flex flex-col justify-start gap-1 fixed right-2 sm:right-4 md:right-6 top-24 sm:top-28 md:top-8 z-20 max-h-[calc(100vh-300px)] md:max-h-[calc(100vh-250px)] overflow-y-auto pr-1 py-2">
               {userMessages.slice(0, 10).map((msg, index) => {
                 const isActive = activeRequestId === msg.id;
                 return (
@@ -3054,7 +3388,7 @@ export default function HomeView() {
                         🔒 Request Limit Reached
                       </h3>
                       <p className="text-xs md:text-sm text-[var(--muted)] mt-1">
-                        You've reached 10 conversation turns. Start a new chat to continue.
+                        You&apos;ve reached 10 conversation turns. Start a new chat to continue.
                       </p>
                     </div>
                     
