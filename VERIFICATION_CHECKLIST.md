@@ -3,21 +3,23 @@
 ## Phase 1: Code Files Created
 
 ### Services (2 files)
+
 ```
 ☐ app/services/modelRegistry.ts
   - Contains AIModelRegistry class
   - 28 models across 5 providers
-  - Methods: getAllModels(), getModelsByProvider(), getModelsByCategory(), 
+  - Methods: getAllModels(), getModelsByProvider(), getModelsByCategory(),
              getModel(), findBestModel(), getSummary()
 
 ☐ app/services/aiToolsService.ts
   - Contains AIToolsService class
-  - Methods: generateImage(), generateVideo(), performOCR(), 
+  - Methods: generateImage(), generateVideo(), performOCR(),
              generateDocument(), processAIToolRequest()
   - Support for fallback providers
 ```
 
 ### API Routes (2 files)
+
 ```
 ☐ app/api/chronoread/models/route.ts
   - GET handler with filters (provider, category, q)
@@ -31,6 +33,7 @@
 ```
 
 ### Components (3 files)
+
 ```
 ☐ components/AIToolsMenu.tsx
   - Dropdown menu component
@@ -50,6 +53,7 @@
 ```
 
 ### Scripts (1 file)
+
 ```
 ☐ scripts/list-all-models.ts
   - CLI script to list all models
@@ -109,6 +113,7 @@
 ## Phase 3: Features Implemented
 
 ### Model Registry
+
 ```
 ☐ 10 Text Generation Models
   [✓] GPT-4 Turbo (OpenAI)
@@ -153,6 +158,7 @@
 ```
 
 ### AI Tools
+
 ```
 ☐ Image Generation
   [✓] DALL-E 3 integration
@@ -183,6 +189,7 @@
 ```
 
 ### UI Features
+
 ```
 ☐ Search Bar Updates
   [✓] "+" button visible in search field
@@ -210,6 +217,7 @@
 ```
 
 ### API Features
+
 ```
 ☐ Models Endpoint (/api/chronoread/models)
   [✓] GET all models
@@ -232,6 +240,7 @@
 ## Phase 4: Configuration & Setup
 
 ### Environment Variables Needed
+
 ```
 ☐ OPENAI_API_KEY
 ☐ ANTHROPIC_API_KEY
@@ -243,6 +252,7 @@
 ```
 
 ### Dependencies to Install
+
 ```
 ☐ @anthropic-ai/sdk
 ☐ @google/generative-ai
@@ -255,6 +265,7 @@
 ```
 
 ### NPM Scripts to Add
+
 ```
 ☐ npm run list-models          - Lists all 28 available models
 ☐ npm run build                - Should include all new files
@@ -264,6 +275,7 @@
 ## Phase 5: Integration Points
 
 ### SearchBar Integration
+
 ```
 ☐ Component accepts optional attachedFile in onSearch callback
 ☐ Maintains backward compatibility
@@ -272,6 +284,7 @@
 ```
 
 ### HomeView Integration (Pending)
+
 ```
 ☐ Update submitQuery to handle attachedFile
 ☐ Route file to appropriate tool based on tool type
@@ -280,6 +293,7 @@
 ```
 
 ### API Integration
+
 ```
 ☐ Models endpoint accessible at /api/chronoread/models
 ☐ AI tools endpoint accessible at /api/chronoread/ai-tools
@@ -290,6 +304,7 @@
 ## Phase 6: Verification Steps
 
 ### Step 1: Code Quality
+
 ```
 ☐ TypeScript compilation successful: npm run build
 ☐ No eslint errors: npm run lint (if configured)
@@ -298,6 +313,7 @@
 ```
 
 ### Step 2: Model Registry
+
 ```
 ☐ Run: npm run list-models
 ☐ Expected: Shows 28 models loaded from all providers
@@ -306,9 +322,10 @@
 ```
 
 ### Step 3: API Endpoints
+
 ```
 ☐ Start server: npm run dev
-☐ Test models endpoint: 
+☐ Test models endpoint:
   curl http://localhost:3000/api/chronoread/models
   ✓ Returns 200 with { count: 28, models: [...] }
 
@@ -323,6 +340,7 @@
 ```
 
 ### Step 4: UI Components
+
 ```
 ☐ SearchBar renders without errors
 ☐ "+" button visible and clickable
@@ -334,6 +352,7 @@
 ```
 
 ### Step 5: File Upload Test
+
 ```
 ☐ Can upload images via file picker
 ☐ Can upload documents via file picker
@@ -343,6 +362,7 @@
 ```
 
 ### Step 6: End-to-End
+
 ```
 ☐ User can enter search query
 ☐ User can click "+" button
@@ -357,6 +377,7 @@
 ## Phase 7: Documentation Verification
 
 ### AI_TOOLS_QUICK_START.md
+
 ```
 ☐ 5-minute setup section present
 ☐ Installation commands correct
@@ -368,6 +389,7 @@
 ```
 
 ### SETUP_AI_TOOLS.md
+
 ```
 ☐ Dependencies listed with npm install command
 ☐ Environment variables section complete
@@ -378,6 +400,7 @@
 ```
 
 ### AI_TOOLS_DOCUMENTATION.md
+
 ```
 ☐ Complete service documentation
 ☐ All API endpoints documented
@@ -391,6 +414,7 @@
 ## Phase 8: Production Readiness
 
 ### Code Quality
+
 ```
 ☐ All functions have TypeScript types
 ☐ Error handling implemented
@@ -402,6 +426,7 @@
 ```
 
 ### Security
+
 ```
 ☐ API keys in environment variables only
 ☐ No secrets in version control
@@ -413,6 +438,7 @@
 ```
 
 ### Performance
+
 ```
 ☐ Model registry cached in memory
 ☐ No unnecessary API calls
@@ -423,6 +449,7 @@
 ```
 
 ### Documentation
+
 ```
 ☐ API endpoints documented
 ☐ Code examples provided
@@ -436,6 +463,7 @@
 ## Final Verification
 
 ### Pre-Deployment Checklist
+
 ```
 ☐ All files created successfully
 ☐ No build errors: npm run build
@@ -451,6 +479,7 @@
 ```
 
 ### Post-Deployment Tasks
+
 ```
 ☐ Test in production environment
 ☐ Monitor API costs
@@ -469,6 +498,7 @@
 ## Summary
 
 ### ✅ Completed
+
 - [x] 13 files created/updated (7 code, 6 documentation)
 - [x] 28 AI models registered across 5 providers
 - [x] 5 AI tools implemented with fallback logic
@@ -480,6 +510,7 @@
 - [x] Code examples and troubleshooting
 
 ### ⏳ Pending
+
 - [ ] npm install (user to run)
 - [ ] Environment variable configuration
 - [ ] Verification: npm run list-models
@@ -488,6 +519,7 @@
 - [ ] Production deployment
 
 ### 📊 Statistics
+
 - **Code Files**: 7 (2 services, 2 API routes, 2 components, 1 script)
 - **Documentation Files**: 6 (2,200+ lines)
 - **Total New Code**: ~1,700 lines

@@ -21,21 +21,21 @@ This system provides:
 Central registry for all AI models with smart selection capabilities.
 
 ```typescript
-import AIModelRegistry from '@/app/services/modelRegistry';
+import AIModelRegistry from "@/app/services/modelRegistry";
 
 // Get all models
 const allModels = AIModelRegistry.getAllModels();
 
 // Filter by provider
-const openaiModels = AIModelRegistry.getModelsByProvider('openai');
+const openaiModels = AIModelRegistry.getModelsByProvider("openai");
 
 // Filter by category (text, vision, image, video, audio, ocr)
-const textModels = AIModelRegistry.getModelsByCategory('text');
+const textModels = AIModelRegistry.getModelsByCategory("text");
 
 // Find best model by criteria
 const bestModel = AIModelRegistry.findBestModel({
-  category: 'text',
-  priority: 'speed' // or 'quality' or 'cost'
+  category: "text",
+  priority: "speed", // or 'quality' or 'cost'
 });
 
 // Get summary
@@ -47,46 +47,46 @@ const summary = AIModelRegistry.getSummary();
 Handles image generation, video creation, OCR, and document processing.
 
 ```typescript
-import { processAIToolRequest } from '@/app/services/aiToolsService';
+import { processAIToolRequest } from "@/app/services/aiToolsService";
 
 // Generate image
 const imageResult = await processAIToolRequest({
-  type: 'image',
-  prompt: 'A sunset over mountains',
+  type: "image",
+  prompt: "A sunset over mountains",
   options: {
-    size: '1024x1024',
-    quality: 'hd',
-    style: 'vivid',
+    size: "1024x1024",
+    quality: "hd",
+    style: "vivid",
   },
 });
 
 // Generate video
 const videoResult = await processAIToolRequest({
-  type: 'video',
-  prompt: 'A car driving through a scenic road',
+  type: "video",
+  prompt: "A car driving through a scenic road",
   options: {
     duration: 4,
-    resolution: '1080p',
+    resolution: "1080p",
   },
 });
 
 // Perform OCR
 const ocrResult = await processAIToolRequest({
-  type: 'ocr',
+  type: "ocr",
   file: imageBuffer,
   options: {
-    language: 'eng',
+    language: "eng",
   },
 });
 
 // Generate document
 const docResult = await processAIToolRequest({
-  type: 'document',
-  prompt: 'Your document content here',
+  type: "document",
+  prompt: "Your document content here",
   options: {
-    format: 'pdf',
-    title: 'My Document',
-    author: 'John Doe',
+    format: "pdf",
+    title: "My Document",
+    author: "John Doe",
   },
 });
 ```
@@ -98,11 +98,13 @@ const docResult = await processAIToolRequest({
 Retrieve and query available AI models.
 
 **GET Parameters:**
+
 - `provider`: Filter by provider (openai, anthropic, google, xai, specialized)
 - `category`: Filter by category (text, vision, image, video, audio, ocr)
 - `q`: Search query (searches name, displayName, description)
 
 **Example:**
+
 ```bash
 # Get all GPT models
 GET /api/chronoread/models?provider=openai
@@ -146,6 +148,7 @@ POST /api/chronoread/models
 Process various AI tool requests.
 
 **POST Request:**
+
 ```json
 {
   "type": "image",
@@ -160,6 +163,7 @@ Process various AI tool requests.
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -175,16 +179,19 @@ Process various AI tool requests.
 ### Text Generation (10 models)
 
 **Budget-Friendly:**
+
 - `gpt-3.5-turbo` - OpenAI (0.5-1.5 $/MTok)
 - `claude-3-haiku` - Anthropic (0.25-1.25 $/MTok)
 - `gemini-1.5-flash` - Google (0.075-0.3 $/MTok)
 
 **Balanced:**
+
 - `gpt-4` - OpenAI (30-60 $/MTok)
 - `claude-3-sonnet` - Anthropic (3-15 $/MTok)
 - `grok-1` - xAI (5-15 $/MTok)
 
 **Premium:**
+
 - `gpt-4-turbo` - OpenAI (10-30 $/MTok)
 - `claude-3-opus` - Anthropic (15-75 $/MTok)
 - `gemini-1.5-pro` - Google (3.5-10.5 $/MTok)
@@ -286,26 +293,26 @@ This generates a comprehensive list of all available models across providers wit
 ### Select Best Model for Task
 
 ```typescript
-import AIModelRegistry from '@/app/services/modelRegistry';
+import AIModelRegistry from "@/app/services/modelRegistry";
 
 // For fast response (coding, chatbot):
 const fastModel = AIModelRegistry.findBestModel({
-  category: 'text',
-  priority: 'speed',
+  category: "text",
+  priority: "speed",
 });
 // Result: Claude 3 Haiku or Gemini 1.5 Flash
 
 // For highest quality (reasoning, analysis):
 const qualityModel = AIModelRegistry.findBestModel({
-  category: 'text',
-  priority: 'quality',
+  category: "text",
+  priority: "quality",
 });
 // Result: Claude 3 Opus or GPT-4 Turbo
 
 // For cost-effective solution:
 const budgetModel = AIModelRegistry.findBestModel({
-  category: 'text',
-  priority: 'cost',
+  category: "text",
+  priority: "cost",
 });
 // Result: Gemini 1.5 Flash or Claude 3 Haiku
 ```
@@ -313,21 +320,21 @@ const budgetModel = AIModelRegistry.findBestModel({
 ### Generate Image with Fallback
 
 ```typescript
-import { processAIToolRequest } from '@/app/services/aiToolsService';
+import { processAIToolRequest } from "@/app/services/aiToolsService";
 
 const result = await processAIToolRequest({
-  type: 'image',
-  prompt: 'Beautiful sunset',
+  type: "image",
+  prompt: "Beautiful sunset",
   options: {
-    quality: 'hd',
-    size: '1024x1024',
+    quality: "hd",
+    size: "1024x1024",
   },
 });
 
 if (result.success) {
   console.log(result.data.images);
 } else {
-  console.error('Image generation failed:', result.error);
+  console.error("Image generation failed:", result.error);
 }
 ```
 
@@ -339,14 +346,14 @@ const reader = new FileReader();
 
 reader.onload = async (e) => {
   const base64 = e.target?.result as string;
-  
+
   const result = await processAIToolRequest({
-    type: 'ocr',
+    type: "ocr",
     file: base64,
-    options: { language: 'eng' },
+    options: { language: "eng" },
   });
 
-  console.log('Extracted text:', result.data.fullText);
+  console.log("Extracted text:", result.data.fullText);
 };
 
 reader.readAsDataURL(file);
@@ -401,14 +408,16 @@ Ensure API keys are set in environment variables. The system will return availab
 ### File upload fails
 
 Check file size limits and accepted MIME types for each tool:
-- Image: < 20MB, image/*
-- Video: < 100MB, video/*
-- OCR: < 50MB, image/* or PDF
+
+- Image: < 20MB, image/\*
+- Video: < 100MB, video/\*
+- OCR: < 50MB, image/\* or PDF
 - Document: < 10MB, any text format
 
 ### Tool processing timeout
 
 Large files or complex operations may timeout. Consider:
+
 - Reducing file size
 - Using smaller input batches
 - Selecting faster models

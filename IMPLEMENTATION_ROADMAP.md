@@ -45,15 +45,17 @@
 ```typescript
 // Smart model selection
 AIModelRegistry.findBestModel({
-  category: 'text',
-  priority: 'speed' | 'quality' | 'cost'
+  category: "text",
+  priority: "speed" | "quality" | "cost",
 });
 
 // Provider filtering
-AIModelRegistry.getModelsByProvider('openai' | 'anthropic' | 'google' | 'xai');
+AIModelRegistry.getModelsByProvider("openai" | "anthropic" | "google" | "xai");
 
 // Category filtering
-AIModelRegistry.getModelsByCategory('text' | 'vision' | 'image' | 'video' | 'audio' | 'ocr');
+AIModelRegistry.getModelsByCategory(
+  "text" | "vision" | "image" | "video" | "audio" | "ocr",
+);
 
 // Cost tracking
 // Each model includes cost per million tokens
@@ -63,6 +65,7 @@ AIModelRegistry.getModelsByCategory('text' | 'vision' | 'image' | 'video' | 'aud
 ### Available Models by Provider
 
 **OpenAI (5 models)**
+
 - gpt-4-turbo (128K context, $10-30/MTok)
 - gpt-4 (8K context)
 - gpt-3.5-turbo (4K context, fastest)
@@ -70,6 +73,7 @@ AIModelRegistry.getModelsByCategory('text' | 'vision' | 'image' | 'video' | 'aud
 - Whisper V3 (speech-to-text)
 
 **Anthropic (5 models)**
+
 - claude-3-opus (200K context, ultra-capable)
 - claude-3-sonnet (200K context, balanced)
 - claude-3-haiku (200K context, fastest)
@@ -77,6 +81,7 @@ AIModelRegistry.getModelsByCategory('text' | 'vision' | 'image' | 'video' | 'aud
 - claude-instant-1.2 (fast, low-cost)
 
 **Google (5 models)**
+
 - gemini-1.5-pro (1M context, ultra)
 - gemini-1.5-flash (1M context, budget)
 - gemini-1.0-pro (32K context)
@@ -84,11 +89,13 @@ AIModelRegistry.getModelsByCategory('text' | 'vision' | 'image' | 'video' | 'aud
 - Text Embedding 004
 
 **xAI (3 models)**
+
 - grok-1 (128K context, real-time)
 - grok-1-vision (multimodal)
 - grok-1-32k (reduced context)
 
 **Specialized Services (10 services)**
+
 - DALL-E 2 (image variations)
 - Stable Diffusion 3 (open-source images)
 - Pika 1.0 (video generation)
@@ -102,11 +109,13 @@ AIModelRegistry.getModelsByCategory('text' | 'vision' | 'image' | 'video' | 'aud
 ### 1. SearchBar Integration
 
 **Before:**
+
 ```typescript
 <SearchBar onSearch={(query, category) => {...}} />
 ```
 
 **After:**
+
 ```typescript
 <SearchBar onSearch={(query, category, attachedFile) => {...}} />
 ```
@@ -120,13 +129,14 @@ interface AttachedFile {
   size: number;
   type: string;
   base64?: string;
-  tool: 'image' | 'video' | 'ocr' | 'document';
+  tool: "image" | "video" | "ocr" | "document";
 }
 ```
 
 ### 3. Chat Integration
 
 Files can be attached to queries:
+
 1. User selects tool type (image, video, OCR, document)
 2. Uploads file
 3. File appears in attachment widget
@@ -137,6 +147,7 @@ Files can be attached to queries:
 ## 📊 API Endpoint Examples
 
 ### Get All Models
+
 ```bash
 GET /api/chronoread/models
 Response:
@@ -152,12 +163,14 @@ Response:
 ```
 
 ### Filter Models
+
 ```bash
 GET /api/chronoread/models?provider=openai&category=text
 GET /api/chronoread/models?q=claude
 ```
 
 ### Find Best Model
+
 ```bash
 POST /api/chronoread/models
 {
@@ -170,6 +183,7 @@ POST /api/chronoread/models
 ```
 
 ### Process AI Tool
+
 ```bash
 POST /api/chronoread/ai-tools
 {
@@ -182,6 +196,7 @@ POST /api/chronoread/ai-tools
 ## 🎯 Usage Workflows
 
 ### Workflow 1: Image Generation
+
 1. User clicks **+** button
 2. Selects "Image Creation"
 3. System prompts for image description in search field
@@ -191,6 +206,7 @@ POST /api/chronoread/ai-tools
 7. Result displayed in chat with image
 
 ### Workflow 2: OCR Document
+
 1. User clicks **+** button
 2. Selects "OCR"
 3. File picker opens (accepts images, PDFs)
@@ -201,6 +217,7 @@ POST /api/chronoread/ai-tools
 8. Text extracted and displayed
 
 ### Workflow 3: Video Generation
+
 1. User clicks **+** button
 2. Selects "Video Creation"
 3. File picker opens (optional base image)
@@ -210,6 +227,7 @@ POST /api/chronoread/ai-tools
 7. Result with preview displayed
 
 ### Workflow 4: Auto-Model Selection
+
 1. System detects user needs
 2. Automatically selects best model based on:
    - Task type (category)
@@ -253,7 +271,7 @@ POST /api/chronoread/ai-tools
     video: number;
     ocr: number;
     document: number;
-  };
+  }
   averageResponseTime: number;
   errorRate: number;
   costByProvider: {
@@ -261,19 +279,21 @@ POST /api/chronoread/ai-tools
     anthropic: number;
     google: number;
     xai: number;
-  };
+  }
 }
 ```
 
 ## 🚀 Performance Optimization
 
 ### Implemented
+
 - Model caching at startup
 - Lazy loading of tool components
 - Efficient file processing
 - Streaming support for large files
 
 ### Recommended
+
 - Implement model performance benchmarking
 - Add response caching
 - Implement request deduplication
@@ -288,6 +308,7 @@ POST /api/chronoread/ai-tools
 ## 🔄 Future Enhancements
 
 ### Phase 6: Advanced Features
+
 - [ ] Model performance dashboard
 - [ ] Cost analytics and budgeting
 - [ ] Multi-model comparison tool
@@ -298,6 +319,7 @@ POST /api/chronoread/ai-tools
 - [ ] Usage-based model switching
 
 ### Phase 7: Enterprise Features
+
 - [ ] SSO integration
 - [ ] Advanced audit logging
 - [ ] Role-based access control
@@ -310,14 +332,17 @@ POST /api/chronoread/ai-tools
 ### Adding a New Model
 
 1. Add to appropriate array in `modelRegistry.ts`:
+
 ```typescript
-const NEW_MODELS: AIModelProfile[] = [{
-  id: 'new-model-1',
-  provider: 'provider-name',
-  name: 'model-api-name',
-  displayName: 'Human Readable Name',
-  // ... other fields
-}];
+const NEW_MODELS: AIModelProfile[] = [
+  {
+    id: "new-model-1",
+    provider: "provider-name",
+    name: "model-api-name",
+    displayName: "Human Readable Name",
+    // ... other fields
+  },
+];
 ```
 
 2. Include in registry initialization
@@ -327,6 +352,7 @@ const NEW_MODELS: AIModelProfile[] = [{
 ### Adding a New Tool
 
 1. Create handler in `aiToolsService.ts`:
+
 ```typescript
 export async function newTool(input: string): Promise<AIToolResponse> {
   // Implementation
@@ -334,19 +360,23 @@ export async function newTool(input: string): Promise<AIToolResponse> {
 ```
 
 2. Add to `processAIToolRequest`:
+
 ```typescript
 case 'newtool':
   return newTool(request.prompt);
 ```
 
 3. Add to AIToolsMenu options:
+
 ```typescript
-const TOOL_OPTIONS: ToolOption[] = [{
-  type: 'newtool',
-  label: 'New Tool',
-  icon: '🆕',
-  description: 'New tool description',
-}];
+const TOOL_OPTIONS: ToolOption[] = [
+  {
+    type: "newtool",
+    label: "New Tool",
+    icon: "🆕",
+    description: "New tool description",
+  },
+];
 ```
 
 ### Adding a New Provider

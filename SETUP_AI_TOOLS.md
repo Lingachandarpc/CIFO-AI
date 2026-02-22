@@ -109,6 +109,7 @@ npm run list-models
 ```
 
 Expected output:
+
 ```
 🚀 AI Model Aggregator - OpenRouter Style
 
@@ -147,11 +148,13 @@ SPECIALIZED: 10 services
 ### 1. SearchBar Component
 
 The SearchBar has been updated with the AI Tools menu. It now:
+
 - Shows a **+** button for AI tools menu
 - Displays attached files
 - Passes file data to search handler
 
 Usage remains the same:
+
 ```typescript
 <SearchBar onSearch={(query, category, file) => handleSearch(query, category, file)} />
 ```
@@ -196,16 +199,16 @@ Add a custom provider to the model registry:
 
 const CUSTOM_MODELS: AIModelProfile[] = [
   {
-    id: 'custom-model-1',
-    provider: 'specialized',
-    name: 'custom-model-1',
-    displayName: 'My Custom Model',
-    description: 'Custom model for specific use case',
+    id: "custom-model-1",
+    provider: "specialized",
+    name: "custom-model-1",
+    displayName: "My Custom Model",
+    description: "Custom model for specific use case",
     contextWindow: 8192,
-    categories: ['text'],
-    capabilities: ['text-generation'],
-    costEffectiveness: 'balanced',
-    performance: 'high',
+    categories: ["text"],
+    capabilities: ["text-generation"],
+    costEffectiveness: "balanced",
+    performance: "high",
   },
 ];
 
@@ -224,10 +227,10 @@ export async function customTool(input: string): Promise<AIToolResponse> {
   // Your custom implementation
   return {
     success: true,
-    data: { result: 'custom output' },
-    type: 'image',
+    data: { result: "custom output" },
+    type: "image",
     processingTime: 100,
-    provider: 'custom',
+    provider: "custom",
   };
 }
 ```
@@ -235,12 +238,12 @@ export async function customTool(input: string): Promise<AIToolResponse> {
 ### 3. Advanced File Processing
 
 ```typescript
-import { AttachedFile } from '@/components/FileAttachment';
+import { AttachedFile } from "@/components/FileAttachment";
 
 async function processAttachedFile(file: AttachedFile) {
-  const response = await fetch('/api/chronoread/ai-tools', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const response = await fetch("/api/chronoread/ai-tools", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       type: file.tool,
       file: file.base64,
@@ -261,6 +264,7 @@ async function processAttachedFile(file: AttachedFile) {
 ### Issue: "Module not found" errors
 
 **Solution:**
+
 ```bash
 npm install
 # Clear Next.js cache
@@ -271,6 +275,7 @@ npm run dev
 ### Issue: API keys not recognized
 
 **Solution:**
+
 1. Verify keys in `.env.local` (not `.env`)
 2. Restart dev server after changing env
 3. Check key format and expiration
@@ -278,6 +283,7 @@ npm run dev
 ### Issue: File upload fails
 
 **Solution:**
+
 1. Check `MAX_FILE_SIZE` in env
 2. Verify file type in `ALLOWED_FILE_TYPES`
 3. Check browser console for errors
@@ -285,6 +291,7 @@ npm run dev
 ### Issue: Model endpoint returns 500 error
 
 **Solution:**
+
 ```bash
 # Check API keys are set
 echo $OPENAI_API_KEY
@@ -301,24 +308,24 @@ npm run list-models
 
 ```typescript
 // In your component or API route
-import AIModelRegistry from '@/app/services/modelRegistry';
+import AIModelRegistry from "@/app/services/modelRegistry";
 
-console.log('Available models:', AIModelRegistry.getSummary());
-console.log('OpenAI models:', AIModelRegistry.getModelsByProvider('openai'));
+console.log("Available models:", AIModelRegistry.getSummary());
+console.log("OpenAI models:", AIModelRegistry.getModelsByProvider("openai"));
 ```
 
 ### 2. Test AI Tools
 
 ```typescript
-import { processAIToolRequest } from '@/app/services/aiToolsService';
+import { processAIToolRequest } from "@/app/services/aiToolsService";
 
 // Test image generation
 const result = await processAIToolRequest({
-  type: 'image',
-  prompt: 'Test image',
+  type: "image",
+  prompt: "Test image",
 });
 
-console.log('Image generation:', result);
+console.log("Image generation:", result);
 ```
 
 ### 3. Test API Endpoints
@@ -355,10 +362,10 @@ const MODEL_CACHE_TTL = 1 * 60 * 60 * 1000; // 1 hour
 // For large files, use streaming
 async function uploadFileStream(file: File) {
   const formData = new FormData();
-  formData.append('file', file);
+  formData.append("file", file);
 
-  const response = await fetch('/api/chronoread/ai-tools', {
-    method: 'POST',
+  const response = await fetch("/api/chronoread/ai-tools", {
+    method: "POST",
     body: formData, // No manual base64 conversion
   });
 
@@ -386,6 +393,7 @@ NODE_DEBUG=* npm run dev
 ```
 
 For model-specific issues, check provider documentation:
+
 - [OpenAI API Docs](https://platform.openai.com/docs)
 - [Anthropic Docs](https://console.anthropic.com/docs)
 - [Google AI Docs](https://ai.google.dev/docs)
