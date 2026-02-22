@@ -88,6 +88,28 @@ export interface ChatMessage {
   mode?: SearchMode;
   audioBlob?: string;
   modelUsed?: AIModel;
+  media?: {
+    type: "image" | "video";
+    url: string;
+    prompt: string;
+    modelUsed?: string;
+  };
+  attachments?: Array<{
+    name: string;
+    type: string;
+    data?: string; // base64 or URL
+    size?: number;
+  }>;
+  imageConfig?: {
+    size?: string;
+    quality?: string;
+    style?: string;
+  };
+  videoConfig?: {
+    duration?: number;
+    resolution?: string;
+    aspectRatio?: string;
+  };
   animate?: boolean;
   referencesHtml?: string; // Favicon-based references HTML
 }
@@ -98,6 +120,20 @@ export interface VoiceProfile {
   pace?: "slow" | "medium" | "fast";
   pitch?: "low" | "medium" | "high";
   slang?: "none" | "light" | "moderate";
+}
+
+export interface HistoryConversationEntry {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  media?: {
+    type: "image" | "video";
+    url: string;
+    prompt: string;
+    modelUsed?: string;
+  };
+  modelUsed?: AIModel;
+  referencesHtml?: string;
 }
 
 export interface HistoryItem {
@@ -113,6 +149,6 @@ export interface HistoryItem {
   suggestions?: string[];
   modelUsed?: AIModel;
   voiceProfile?: VoiceProfile;
-  conversation?: Array<Pick<ChatMessage, "role" | "content" | "timestamp">>;
+  conversation?: HistoryConversationEntry[];
   referencesHtml?: string; // Favicon-based references HTML
 }

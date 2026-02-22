@@ -95,7 +95,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
   }
 
   const containerProps: { width: ChartWidth; height: number } = {
-    width,
+    width: '100%',
     height: height + 40,
   };
 
@@ -103,7 +103,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
     switch (type) {
       case 'line':
         return (
-          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-3 sm:p-4 overflow-hidden">
             {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
@@ -137,7 +137,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
       case 'bar':
         return (
-          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-3 sm:p-4 overflow-hidden">
             {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <BarChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
@@ -164,7 +164,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
 
       case 'area':
         return (
-          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-3 sm:p-4 overflow-hidden">
             {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <AreaChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
@@ -199,7 +199,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
       case 'pie':
         const pieDataKey = Array.isArray(yAxisKey) ? (yAxisKey[0] || 'value') : (yAxisKey || 'value');
         return (
-          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-3 sm:p-4 overflow-hidden">
             {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <PieChart>
@@ -228,7 +228,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
           ? (yAxisKey[0] || 'value')
           : (yAxisKey || seriesKeys?.[0] || 'value');
         return (
-          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-3 sm:p-4 overflow-hidden">
             {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <RadialBarChart
@@ -267,7 +267,7 @@ export function ChartRenderer({ chartData }: { chartData: ChartData }) {
       case 'composed':
         // Composed chart for multi-series with mixed types
         return (
-          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-4">
+          <div className="my-4 rounded-lg border border-(--border) bg-(--surface) p-3 sm:p-4 overflow-hidden">
             {title && <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4>}
             <ResponsiveContainer {...containerProps}>
               <ComposedChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>

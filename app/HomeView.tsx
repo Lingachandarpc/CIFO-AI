@@ -4,10 +4,12 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
-import { SearchMode, Settings, ChatMessage, HistoryItem, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel, VoiceProfile, DEFAULT_GOOGLE_VOICE } from './types';
+import { SearchMode, Settings, ChatMessage, HistoryItem, HistoryConversationEntry, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel, VoiceProfile, DEFAULT_GOOGLE_VOICE } from './types';
 import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon, VolumeIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
-import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions } from './services/openaiService';
+import SearchBar, { type AttachedFile } from '../components/SearchBar';
+import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus } from './services/openaiService';
+import MediaEditorDialog from '../components/MediaEditorDialog';
 import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
 import { filterVoicesByGender, generateSpeechWithGoogle, getGoogleLanguageCode, listGoogleVoices, resolveGoogleVoice, GoogleVoice } from './services/googleTtsService';
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
@@ -20,6 +22,13 @@ import NanobotGame, { type GameConfig } from '../components/NanobotGame';
 
 type TabsBlock = { label: string; content: string };
 type TableBlock = { title?: string; columns: string[]; rows: string[][] };
+type MediaDialogState = {
+  open: boolean;
+  type: 'image' | 'video';
+  url: string;
+  prompt: string;
+  modelUsed?: string;
+};
 
 const AVAILABLE_GAMES = [
   { key: 'tic_tac_toe', label: 'Tic-Tac-Toe' },
@@ -173,14 +182,14 @@ const TabsBlockView = ({ raw }: { raw: string }) => {
   }
 
   return (
-    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] px-3 py-2">
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] px-3 py-2 overflow-x-auto">
         {tabs.map((tab, index) => (
           <button
             key={`${tab.label}-${index}`}
             type="button"
             onClick={() => setActiveIndex(index)}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
               index === activeIndex
                 ? 'bg-[var(--foreground)] text-[var(--background)]'
                 : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:text-[var(--foreground)]'
@@ -190,7 +199,7 @@ const TabsBlockView = ({ raw }: { raw: string }) => {
           </button>
         ))}
       </div>
-      <div className="p-3 text-sm">
+      <div className="p-3 text-sm overflow-x-auto">
         <MarkdownBody content={active.content} />
       </div>
     </div>
@@ -276,14 +285,14 @@ const TableBlockView = ({ raw }: { raw: string }) => {
   }
 
   return (
-    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 overflow-hidden">
       {parsed.title && <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">{parsed.title}</p>}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+      <div className="overflow-x-auto -mx-3 -mb-3 px-3 pb-3">
+        <table className="min-w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-[var(--border)]">
               {parsed.columns.map((column) => (
-                <th key={column} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-strong)]">
+                <th key={column} className="px-2 sm:px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-strong)] whitespace-nowrap">
                   {column}
                 </th>
               ))}
@@ -293,7 +302,7 @@ const TableBlockView = ({ raw }: { raw: string }) => {
             {parsed.rows.map((row, rowIndex) => (
               <tr key={`${row.join('-')}-${rowIndex}`} className="border-b border-[var(--border)] last:border-b-0">
                 {row.map((cell, cellIndex) => (
-                  <td key={`${cell}-${cellIndex}`} className="px-3 py-2 text-[var(--foreground)]">
+                  <td key={`${cell}-${cellIndex}`} className="px-2 sm:px-3 py-2 text-[var(--foreground)] text-xs sm:text-sm whitespace-normal break-words">
                     {cell}
                   </td>
                 ))}
@@ -348,20 +357,20 @@ const ProgressBlockView = ({ raw }: { raw: string }) => {
   const percent = Math.min(100, Math.max(0, (numericValue / maxValue) * 100));
 
   return (
-    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <div className="flex items-center justify-between text-xs uppercase tracking-widest text-[var(--muted)]">
-        <span>{label}</span>
-        <span>{valueText}</span>
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 overflow-hidden">
+      <div className="flex items-center justify-between text-xs uppercase tracking-widest text-[var(--muted)] gap-2">
+        <span className="truncate flex-shrink-0">{label}</span>
+        <span className="text-right flex-shrink-0 ml-auto">{valueText}</span>
       </div>
-      <div className="mt-2 h-2 w-full rounded-full bg-[var(--surface-strong)]">
+      <div className="mt-2 h-2 w-full rounded-full bg-[var(--surface-strong)] overflow-hidden">
         <div
           className="h-2 rounded-full bg-[var(--foreground)]"
           style={{ width: `${percent}%` }}
         />
       </div>
-      <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-[var(--muted)]">
-        <span>{left}</span>
-        <span>{right}</span>
+      <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-[var(--muted)] gap-1">
+        <span className="flex-shrink-0">{left}</span>
+        <span className="flex-shrink-0">{right}</span>
       </div>
     </div>
   );
@@ -494,6 +503,10 @@ export default function HomeView() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState('auto');
+  const [mediaDialog, setMediaDialog] = useState<MediaDialogState | null>(null);
+  const [isMediaRegenerating, setIsMediaRegenerating] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.CASE_STUDY);
   const [interactionMode, setInteractionMode] = useState<"read" | "listen">("read");
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -505,6 +518,7 @@ export default function HomeView() {
   const [selectedHistory, setSelectedHistory] = useState<HistoryItem | null>(null);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobileJumpOpen, setIsMobileJumpOpen] = useState(false);
   const [isNarrating, setIsNarrating] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(true);
   const [readSuggestions, setReadSuggestions] = useState<string[]>([]);
@@ -972,6 +986,16 @@ export default function HomeView() {
   };
 
   const toggleMic = () => {
+    // If currently in read mode, switch to listen mode
+    if (interactionModeRef.current === "read") {
+      stopNarrationForUiChange();
+      resetListenSession();
+      setMicMuted(false);
+      setInteractionMode("listen");
+      return;
+    }
+
+    // If in listen mode, handle mic mute/unmute
     if (interactionModeRef.current === "listen") {
       if (isMicMutedRef.current) {
         if (isNarratingRef.current) {
@@ -1877,11 +1901,11 @@ export default function HomeView() {
     }
   };
 
-  const stopNarrationForUiChange = () => {
+  const stopNarrationForUiChange = useCallback(() => {
     if (isNarratingRef.current) {
       handleStopNarration();
     }
-  };
+  }, [handleStopNarration]);
 
   useEffect(() => {
     if (interactionModeRef.current !== "listen") return;
@@ -1909,6 +1933,18 @@ export default function HomeView() {
     setSelectedHistory(null);
     setSelectedHistoryId(null);
   };
+
+  const startNewChatSession = useCallback(() => {
+    resetMessageUiState();
+    stopNarrationForUiChange();
+    activeReadSessionIdRef.current = null;
+    setMessages([]);
+    setInputValue('');
+    setReadSuggestions([]);
+    setSelectedHistory(null);
+    setSelectedHistoryId(null);
+    setIsMobileJumpOpen(false);
+  }, [resetMessageUiState, stopNarrationForUiChange]);
 
   const isGenericQuery = (value: string) => {
     const cleaned = value.trim().toLowerCase();
@@ -2164,7 +2200,14 @@ export default function HomeView() {
     };
   };
 
-  const submitQuery = async (query: string) => {
+  const submitQuery = async (query: string, attachments: Array<{
+    id: string;
+    name: string;
+    size: number;
+    type: string;
+    base64?: string;
+    tool: string;
+  }> = []) => {
     if (!query.trim() || isLoading) return;
 
     initAudio();
@@ -2188,6 +2231,14 @@ export default function HomeView() {
       content: userQuery,
       timestamp: requestTimestamp,
       mode: currentMode,
+      attachments: attachments.length > 0 ? attachments.map(f => ({
+        name: f.name,
+        type: f.type,
+        data: f.base64,
+        size: f.size,
+      })) : undefined,
+      imageConfig: selectedTool === 'image' ? JSON.parse(sessionStorage.getItem('imageConfig') || '{}') : undefined,
+      videoConfig: selectedTool === 'video' ? JSON.parse(sessionStorage.getItem('videoConfig') || '{}') : undefined,
     };
 
     setMessages(prev => [...prev, newUserMsg]);
@@ -2195,7 +2246,7 @@ export default function HomeView() {
     setSelectedHistory(null);
 
     const existingItem = history.find((entry) => entry.id === historyId);
-    const existingConversation: Array<Pick<ChatMessage, 'role' | 'content' | 'timestamp'>> = existingItem?.conversation?.map((entry) => ({
+    const existingConversation: HistoryConversationEntry[] = existingItem?.conversation?.map((entry) => ({
       ...entry,
       role: entry.role as 'user' | 'assistant',
     })) || [];
@@ -2224,6 +2275,143 @@ export default function HomeView() {
           mode: currentMode === SearchMode.BOOK ? 'BOOK' : 'CASE_STUDY',
         }),
       }).catch((error) => console.error('Error saving user message:', error));
+    }
+
+    if (selectedTool === 'image' || selectedTool === 'video') {
+      setIsLoading(true);
+
+      try {
+        const assistantTimestamp = new Date();
+        let assistantMsg: ChatMessage;
+
+        if (selectedTool === 'image') {
+          const imageConfig = JSON.parse(sessionStorage.getItem('imageConfig') || '{}');
+          const imageResponse = await generateToolImage(userQuery, selectedModel, undefined, imageConfig);
+          const assistantContent = imageResponse.imageUrl
+            ? `Generated image${imageResponse.modelUsed ? ` (${imageResponse.modelUsed})` : ''}`
+            : `I could not generate an image right now. ${imageResponse.error || 'Please try again.'}`;
+
+          assistantMsg = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: assistantContent,
+            timestamp: assistantTimestamp,
+            media: imageResponse.imageUrl
+              ? {
+                  type: 'image',
+                  url: imageResponse.imageUrl,
+                  prompt: userQuery,
+                  modelUsed: imageResponse.modelUsed,
+                }
+              : undefined,
+            animate: interactionModeRef.current === 'read',
+          };
+        } else {
+          const videoConfig = JSON.parse(sessionStorage.getItem('videoConfig') || '{}');
+          const videoResponse = await generateToolVideo(userQuery, selectedModel, videoConfig);
+
+          let resolvedVideoResponse = videoResponse;
+          if (!videoResponse.videoUrl && (videoResponse.operationId || videoResponse.videoId) && (videoResponse.status === 'processing' || !videoResponse.error)) {
+            // Poll up to 20 times with 5-second intervals = 100 seconds total (needed for Gemini video generation)
+            for (let attempt = 0; attempt < 20; attempt++) {
+              console.log(`[Video Polling] Attempt ${attempt + 1}/20, waiting 5 seconds before polling...`);
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+              
+              const polled = await pollToolVideoStatus({
+                model: selectedModel,
+                provider: videoResponse.provider,
+                operationId: videoResponse.operationId,
+                videoId: videoResponse.videoId,
+              });
+
+              console.log(`[Video Polling] Poll attempt ${attempt + 1}/20 result:`, polled);
+              
+              resolvedVideoResponse = {
+                ...resolvedVideoResponse,
+                ...polled,
+              };
+
+              if (resolvedVideoResponse.videoUrl && resolvedVideoResponse.status === 'completed') {
+                console.log('[Video Polling] Video generation completed!');
+                break;
+              }
+
+              if (resolvedVideoResponse.error) {
+                console.error('[Video Polling] Error received:', resolvedVideoResponse.error);
+                break;
+              }
+              
+              if (attempt === 19) {
+                console.warn('[Video Polling] Max polling attempts reached');
+              }
+            }
+          }
+
+          const assistantContent = resolvedVideoResponse.videoUrl
+            ? `Generated video${resolvedVideoResponse.modelUsed ? ` (${resolvedVideoResponse.modelUsed})` : ''}`
+            : `Video request submitted${resolvedVideoResponse.status ? ` (${resolvedVideoResponse.status})` : ''}. ${resolvedVideoResponse.error || 'Provider may still be processing.'}`;
+
+          assistantMsg = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: assistantContent,
+            timestamp: assistantTimestamp,
+            media: resolvedVideoResponse.videoUrl
+              ? {
+                  type: 'video',
+                  url: resolvedVideoResponse.videoUrl,
+                  prompt: userQuery,
+                  modelUsed: resolvedVideoResponse.modelUsed,
+                }
+              : undefined,
+            animate: interactionModeRef.current === 'read',
+          };
+        }
+
+        setMessages((prev) => [...prev, assistantMsg]);
+
+        const updatedHistoryItem: HistoryItem = {
+          ...pendingHistoryItem,
+          response: assistantMsg.content,
+          conversation: [
+            ...(pendingHistoryItem.conversation || []),
+            {
+              role: 'assistant',
+              content: assistantMsg.content,
+              timestamp: assistantTimestamp,
+              media: assistantMsg.media,
+            },
+          ],
+        };
+        upsertHistoryItem(updatedHistoryItem);
+
+        if (isAuthenticated) {
+          fetch('/api/chronoread/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: 'assistant',
+              content: assistantMsg.content,
+              mode: currentMode === SearchMode.BOOK ? 'BOOK' : 'CASE_STUDY',
+              audioBlob: null,
+            }),
+          }).catch((error) => console.error('Error saving media assistant message:', error));
+        }
+      } catch (error) {
+        console.error(error);
+        const errorMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `I ran into an error while generating the ${selectedTool}. Please try again.`,
+          timestamp: new Date(),
+          animate: interactionModeRef.current === 'read',
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } finally {
+        setIsLoading(false);
+      }
+
+      return;
     }
 
     if (interactionModeRef.current === 'read' && isGameIntent(userQuery)) {
@@ -2273,8 +2461,18 @@ export default function HomeView() {
 
     try {
       const chatHistory = [...messages.slice(-5), newUserMsg].map(m => ({ role: m.role, content: m.content }));
+      
+      // Build attachment context for the AI
+      let attachmentContext = '';
+      if (attachments && attachments.length > 0) {
+        attachmentContext = '\n\nAttached files:\n' + attachments.map(f => `- ${f.name}`).join('\n');
+        attachmentContext += '\n\nPlease analyze the attached files and provide insights based on their content.';
+      }
+
+      const finalQuery = attachmentContext ? userQuery + attachmentContext : userQuery;
+
       const narrativeResponse = await generateNarrative(
-        userQuery,
+        finalQuery,
         currentMode,
         settings,
         chatHistory,
@@ -2282,6 +2480,7 @@ export default function HomeView() {
         {
           profile: userProfile || undefined,
           recentQueries: history.slice(0, 8).map((item) => item.query),
+          attachments: attachments, // Pass attachments to the service
         }
       );
       const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
@@ -2379,9 +2578,147 @@ export default function HomeView() {
     }
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    await submitQuery(inputValue);
+  const handleSubmit = async (query: string, attachments: Array<{
+    id: string;
+    name: string;
+    size: number;
+    type: string;
+    base64?: string;
+    tool: string;
+  }> = []) => {
+    if (!query.trim() || isLoading) return;
+    await submitQuery(query, attachments);
+  };
+
+  const handleToolSelect = (tool: string) => {
+    // Create a new session with tool heading
+    setSelectedTool(tool);
+    startNewChatSession();
+    
+    // Add tool context heading
+    const toolHeadings: Record<string, string> = {
+      image: "🎨 Image Creation Session",
+      video: "🎬 Video Creation Session",
+      ocr: "📄 OCR Session",
+      document: "📝 Document Generation Session",
+      dashboard: "📊 Dashboard Session",
+    };
+    
+    const heading = toolHeadings[tool] || `${tool} Session`;
+    const toolMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `**${heading}**\n\nReady to assist with ${tool}. What would you like to do?`,
+      timestamp: new Date(),
+      animate: false,
+    };
+    setMessages([toolMsg]);
+  };
+
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model);
+    // Settings are auto-saved based on the model selection
+  };
+
+  const openMediaDialog = (message: ChatMessage) => {
+    if (!message.media) return;
+    setMediaDialog({
+      open: true,
+      type: message.media.type,
+      url: message.media.url,
+      prompt: message.media.prompt,
+      modelUsed: message.media.modelUsed,
+    });
+  };
+
+  const handleMediaDownload = async () => {
+    if (!mediaDialog?.url) return;
+
+    try {
+      const directAnchor = document.createElement('a');
+      directAnchor.href = mediaDialog.url;
+      directAnchor.target = '_blank';
+      directAnchor.rel = 'noopener noreferrer';
+      directAnchor.download = mediaDialog.type === 'image' ? 'generated-image.png' : 'generated-video.mp4';
+      document.body.appendChild(directAnchor);
+      directAnchor.click();
+      document.body.removeChild(directAnchor);
+      return;
+    } catch {
+    }
+
+    try {
+      const response = await fetch(mediaDialog.url, { mode: 'cors' });
+      if (!response.ok) {
+        throw new Error(`Download request failed with ${response.status}`);
+      }
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = mediaDialog.type === 'image' ? 'generated-image.png' : 'generated-video.mp4';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('Download failed:', error);
+    }
+  };
+
+  const handleMediaRegenerate = async () => {
+    if (!mediaDialog?.prompt.trim()) return;
+
+    setIsMediaRegenerating(true);
+    try {
+      if (mediaDialog.type === 'image') {
+        const imageConfig = JSON.parse(sessionStorage.getItem('imageConfig') || '{}');
+        const regenerated = await generateToolImage(mediaDialog.prompt, selectedModel, mediaDialog.url, imageConfig);
+        if (regenerated.imageUrl) {
+          const regeneratedUrl = regenerated.imageUrl;
+          const assistantMsg: ChatMessage = {
+            id: (Date.now() + 2).toString(),
+            role: 'assistant',
+            content: `Generated image${regenerated.modelUsed ? ` (${regenerated.modelUsed})` : ''}`,
+            timestamp: new Date(),
+            media: {
+              type: 'image',
+              url: regeneratedUrl,
+              prompt: mediaDialog.prompt,
+              modelUsed: regenerated.modelUsed,
+            },
+            animate: interactionModeRef.current === 'read',
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          setMediaDialog((prev) => prev ? { ...prev, url: regeneratedUrl, modelUsed: regenerated.modelUsed } : prev);
+        }
+      } else {
+        const videoConfig = JSON.parse(sessionStorage.getItem('videoConfig') || '{}');
+        const regenerated = await generateToolVideo(mediaDialog.prompt, selectedModel, videoConfig);
+        if (regenerated.videoUrl) {
+          const regeneratedUrl = regenerated.videoUrl;
+          const assistantMsg: ChatMessage = {
+            id: (Date.now() + 2).toString(),
+            role: 'assistant',
+            content: `Generated video${regenerated.modelUsed ? ` (${regenerated.modelUsed})` : ''}`,
+            timestamp: new Date(),
+            media: {
+              type: 'video',
+              url: regeneratedUrl,
+              prompt: mediaDialog.prompt,
+              modelUsed: regenerated.modelUsed,
+            },
+            animate: interactionModeRef.current === 'read',
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          setMediaDialog((prev) => prev ? { ...prev, url: regeneratedUrl, modelUsed: regenerated.modelUsed } : prev);
+        }
+      }
+    } catch (error) {
+      console.error('Regenerate failed:', error);
+    } finally {
+      setIsMediaRegenerating(false);
+    }
   };
 
   const getModelLabel = (model: AIModel) => {
@@ -2800,6 +3137,9 @@ export default function HomeView() {
       content: entry.content,
       timestamp: entry.timestamp,
       mode: item.mode,
+      media: entry.media,
+      modelUsed: entry.modelUsed,
+      referencesHtml: entry.referencesHtml,
       animate: false,
     }));
 
@@ -2829,7 +3169,7 @@ export default function HomeView() {
 
   const getListenConversation = (item: HistoryItem) => {
     if (item.conversation?.length) return item.conversation;
-    const fallback: Array<Pick<ChatMessage, 'role' | 'content' | 'timestamp'>> = [
+    const fallback: HistoryConversationEntry[] = [
       { role: 'user', content: item.query, timestamp: item.timestamp },
     ];
     if (item.response) {
@@ -3182,8 +3522,8 @@ export default function HomeView() {
         )}
 
         {interactionMode === "read" ? (
-          <div className="flex-1 overflow-y-auto pl-3 pr-14 sm:pl-4 sm:pr-16 md:px-0 scroll-smooth pb-28 md:pb-10" ref={readScrollContainerRef}>
-            <div className="max-w-3xl mx-auto py-8 md:py-10 space-y-8">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pl-3 pr-3 sm:pl-4 sm:pr-4 md:px-0 scroll-smooth pb-28 md:pb-10" ref={readScrollContainerRef}>
+            <div className="max-w-3xl mx-auto py-8 md:py-10 space-y-6 px-0">
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
                   <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center border border-[var(--border)]">
@@ -3214,19 +3554,46 @@ export default function HomeView() {
                     className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                   >
                     <div className={`max-w-[92%] md:max-w-[85%] space-y-2 ${isUser ? 'items-end' : 'items-start'}`}>
-                      <div className={`p-3.5 md:p-4 rounded-2xl text-sm md:text-[15px] leading-relaxed ${
+                      <div className={`p-2.5 sm:p-3.5 md:p-4 rounded-2xl text-xs sm:text-sm md:text-[15px] leading-relaxed ${
                         isUser
                           ? 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)]'
-                          : 'bg-transparent text-[var(--foreground)] whitespace-pre-line'
+                          : 'bg-transparent text-[var(--foreground)]'
                       }`}>
-                        {msg.role === 'assistant' && interactionMode === 'read' && settings.narrationType === 'Realistic' && isLatestMessage && !hasGameBlock(displayContent) && (
+                        {msg.role === 'assistant' && interactionMode === 'read' && settings.narrationType === 'Realistic' && isLatestMessage && isLoading && !hasGameBlock(displayContent) && (
                           <div className="mb-3">
-                            <NanobotCanvas isActive={isLoading} />
+                            <NanobotCanvas isActive={true} />
                           </div>
                         )}
                         {msg.role === 'assistant' ? (
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                            <RichMarkdown content={sanitizeNarrationForDisplay(displayContent)} />
+                          <div className="prose prose-sm max-w-none dark:prose-invert overflow-x-auto -mx-2 px-2">
+                            {msg.media && (
+                              <button
+                                type="button"
+                                onClick={() => openMediaDialog(msg)}
+                                className="mb-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2 text-left"
+                              >
+                                {msg.media.type === 'image' ? (
+                                  <img
+                                    src={msg.media.url}
+                                    alt="Generated"
+                                    className="w-full max-h-80 object-contain rounded-lg"
+                                  />
+                                ) : (
+                                  <video
+                                    src={msg.media.url}
+                                    className="w-full max-h-80 rounded-lg"
+                                    preload="metadata"
+                                    muted
+                                  />
+                                )}
+                                <p className="mt-2 text-[10px] uppercase tracking-widest text-[var(--muted)]">
+                                  Click to edit, regenerate, download
+                                </p>
+                              </button>
+                            )}
+                            {sanitizeNarrationForDisplay(displayContent).trim() && (
+                              <RichMarkdown content={sanitizeNarrationForDisplay(displayContent)} />
+                            )}
                           </div>
                         ) : (
                           displayContent
@@ -3279,13 +3646,20 @@ export default function HomeView() {
               })}
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-[var(--surface)] border border-[var(--border)] p-4 rounded-2xl animate-pulse">
-                    <div className="flex gap-2">
-                      <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce delay-75"></div>
-                      <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce delay-150"></div>
+                  {selectedTool === 'image' || selectedTool === 'video' ? (
+                    <div className="media-loader-square">
+                      <div className="media-loader-grid" />
+                      <div className="media-loader-scan" />
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-[var(--surface)] border border-[var(--border)] p-4 rounded-2xl animate-pulse">
+                      <div className="flex gap-2">
+                        <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce delay-75"></div>
+                        <div className="w-2 h-2 bg-[var(--muted)] rounded-full animate-bounce delay-150"></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {!isLoading && readSuggestions.length > 0 && userMessages.length < 10 && (
@@ -3355,8 +3729,8 @@ export default function HomeView() {
 
         {interactionMode === "read" && userMessages.length > 0 && (
           <>
-            {/* Numbered buttons - positioned 50px higher, responsive */}
-            <div className="flex flex-col justify-start gap-1 fixed right-2 sm:right-4 md:right-6 top-24 sm:top-28 md:top-8 z-20 max-h-[calc(100vh-300px)] md:max-h-[calc(100vh-250px)] overflow-y-auto pr-1 py-2">
+            {/* Numbered buttons - Desktop view */}
+            <div className="hidden md:flex flex-col justify-start gap-1 fixed right-2 sm:right-4 md:right-6 top-24 sm:top-28 md:top-8 z-20 max-h-[calc(100vh-300px)] md:max-h-[calc(100vh-250px)] overflow-y-auto pr-1 py-2">
               {userMessages.slice(0, 10).map((msg, index) => {
                 const isActive = activeRequestId === msg.id;
                 return (
@@ -3377,6 +3751,75 @@ export default function HomeView() {
                 );
               })}
             </div>
+
+            {/* Mobile badge button - small centered badge */}
+            <button
+              type="button"
+              onClick={() => setIsMobileJumpOpen((prev) => !prev)}
+              className="md:hidden fixed right-0 top-1/2 -translate-y-1/2 z-30 h-12 w-8 rounded-l-full border-l border-t border-b border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] shadow-lg flex items-center justify-center text-xs font-bold"
+              aria-label={isMobileJumpOpen ? 'Close jump navigation' : 'Open jump navigation'}
+              title="Jump to request"
+            >
+              <span className="rotate-90">{userMessages.length}</span>
+            </button>
+
+            {/* Mobile slider panel */}
+            {isMobileJumpOpen && (
+              <>
+                {/* Backdrop */}
+                <div 
+                  className="md:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
+                  onClick={() => setIsMobileJumpOpen(false)}
+                  aria-hidden="true"
+                />
+                
+                {/* Slider panel */}
+                <div className="md:hidden fixed right-0 top-0 bottom-0 z-50 w-20 bg-[var(--surface)] border-l border-[var(--border)] shadow-2xl animate-in slide-in-from-right duration-200">
+                  <div className="h-full flex flex-col">
+                    {/* Header */}
+                    <div className="flex items-center justify-between p-3 border-b border-[var(--border)]">
+                      <span className="text-xs font-semibold text-[var(--muted)]">Jump</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileJumpOpen(false)}
+                        className="h-6 w-6 rounded-full bg-[var(--background)] text-[var(--foreground)] flex items-center justify-center text-sm font-bold"
+                        aria-label="Close"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    
+                    {/* Numbered buttons with padding */}
+                    <div className="flex-1 overflow-y-auto py-4 px-2">
+                      <div className="flex flex-col gap-3">
+                        {userMessages.slice(0, 10).map((msg, index) => {
+                          const isActive = activeRequestId === msg.id;
+                          return (
+                            <button
+                              key={msg.id}
+                              type="button"
+                              onClick={() => {
+                                scrollToMessage(msg.id);
+                                setIsMobileJumpOpen(false);
+                              }}
+                              className={`h-10 w-full rounded-lg border text-sm font-bold transition-all ${
+                                isActive
+                                  ? 'bg-[var(--foreground)] text-[var(--background)] border-transparent shadow-lg'
+                                  : 'border-[var(--border)] bg-[var(--background)] text-[var(--muted)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]'
+                              }`}
+                              aria-label={`Jump to request ${index + 1}`}
+                              title={`Message ${index + 1}`}
+                            >
+                              {String(index + 1).padStart(2, '0')}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
             
             {/* Limit reached overlay popup - appears at sticky footer bottom */}
             {userMessages.length >= 10 && (
@@ -3394,15 +3837,7 @@ export default function HomeView() {
                     
                     <button
                       type="button"
-                      onClick={() => {
-                        resetMessageUiState();
-                        stopNarrationForUiChange();
-                        setMessages([]);
-                        setInputValue('');
-                        setReadSuggestions([]);
-                        setSelectedHistory(null);
-                        setSelectedHistoryId(null);
-                      }}
+                      onClick={startNewChatSession}
                       className="w-full py-2 px-3 md:py-2.5 md:px-4 rounded-lg bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm md:text-base hover:opacity-90 transition-all"
                     >
                       ✨ Start New Chat
@@ -3415,23 +3850,16 @@ export default function HomeView() {
         )}
 
         {interactionMode === "read" && (
-          <div className={`sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-3 md:p-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
-            <div className="max-w-3xl mx-auto">
-              <form onSubmit={handleSubmit} className="relative group md:relative fixed bottom-0 left-0 right-0 md:static z-10 bg-[var(--background)] p-4 md:p-0 border-t md:border-t-0 border-[var(--border)]">
-                <div className="relative">
+          <div className={`sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-2 md:p-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
+            <div className="max-w-3xl mx-auto w-full">
+              <div className="relative md:relative w-full z-10 bg-[var(--background)] md:p-0">
+                {/* New Chat Button + SearchBar */}
+                <div className="flex gap-2 items-start w-full">
                   {messages.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        resetMessageUiState();
-                        stopNarrationForUiChange();
-                        setMessages([]);
-                        setInputValue('');
-                        setReadSuggestions([]);
-                        setSelectedHistory(null);
-                        setSelectedHistoryId(null);
-                      }}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
+                      onClick={startNewChatSession}
+                      className="mt-2.5 p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all flex-shrink-0"
                       title="New topic"
                     >
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3439,42 +3867,39 @@ export default function HomeView() {
                       </svg>
                     </button>
                   )}
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => { setInputValue(e.target.value); stopNarration(); }}
-                    disabled={userMessages.length >= 10}
-                    placeholder={userMessages.length >= 10 ? "Limit reached - start new chat" : "Ask a story, case, or question..."}
-                    className={`w-full bg-[var(--surface)] border border-[var(--border)] rounded-2xl py-3.5 pr-12 focus:outline-none focus:border-[var(--muted-strong)] focus:bg-[var(--surface-strong)] transition-all text-base placeholder-[var(--muted)] ${
-                      messages.length > 0 ? 'pl-12' : 'pl-4'
-                    } ${userMessages.length >= 10 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  />
-
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                    {inputValue.trim() ? (
-                      <button
-                        type="submit"
-                        disabled={isLoading}
-                        className="p-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] transition-all"
-                        title="Send"
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                        </svg>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={enterListenMode}
-                        className="p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
-                        title="Listen"
-                      >
-                        <MicIcon className="w-5 h-5" />
-                      </button>
-                    )}
+                  <div className="flex-1">
+                    <SearchBar 
+                      disabled={userMessages.length >= 10}
+                      placeholder={userMessages.length >= 10 ? "Limit reached - start new chat" : "Ask a story, case, or question..."}
+                      selectedTool={selectedTool}
+                      selectedModel={selectedModel}
+                      currentMode={selectedTool || 'text'}
+                      isNewChat={messages.length === 0}
+                      isListening={isListening}
+                      onSearch={(query: string, attachments: AttachedFile[] = []) => {
+                        void handleSubmit(query, attachments);
+                      }}
+                      onToolSelect={handleToolSelect}
+                      onModelChange={handleModelChange}
+                      onMicClick={toggleMic}
+                      onConfigChange={(config: { imageConfig?: Record<string, string>; videoConfig?: Record<string, number | string> }) => {
+                        if (config.imageConfig) {
+                          // Store image config for use in image generation
+                          sessionStorage.setItem('imageConfig', JSON.stringify(config.imageConfig));
+                        }
+                        if (config.videoConfig) {
+                          // Store video config for use in video generation
+                          sessionStorage.setItem('videoConfig', JSON.stringify(config.videoConfig));
+                        }
+                      }}
+                    />
                   </div>
                 </div>
-              </form>
+                {/* Disabled state overlay */}
+                {userMessages.length >= 10 && (
+                  <div className="absolute inset-0 bg-[var(--background)]/30 rounded-2xl pointer-events-none" />
+                )}
+              </div>
               <p className="text-[10px] text-center text-[var(--muted)] mt-3 uppercase tracking-widest">
                 Processing in {settings.language} Language
               </p>
@@ -3487,17 +3912,17 @@ export default function HomeView() {
       </main>
 
       {selectedHistory && selectedHistory.interactionMode === "listen" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-[var(--border)] flex justify-between items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+            <div className="p-4 sm:p-6 border-b border-[var(--border)] flex justify-between items-center flex-wrap gap-3">
               <div>
-                <h2 className="text-xl font-bold">Listen Session</h2>
-                <p className="text-xs text-[var(--muted)] uppercase tracking-widest mt-1">{selectedHistory.query}</p>
+                <h2 className="text-lg sm:text-xl font-bold">Listen Session</h2>
+                <p className="text-xs text-[var(--muted)] uppercase tracking-widest mt-1 line-clamp-1">{selectedHistory.query}</p>
                 <p className="text-[10px] text-[var(--muted)] uppercase tracking-widest mt-2">
                   AI Model: {selectedHistory.modelUsed ? getModelLabel(selectedHistory.modelUsed) : getCurrentModelLabel()}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <button
                   type="button"
                   onClick={handleStopNarration}
@@ -3521,27 +3946,27 @@ export default function HomeView() {
               </div>
             </div>
 
-            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="p-4 sm:p-6 space-y-3 sm:space-y-4 max-h-[calc(95vh-200px)] overflow-y-auto overflow-x-hidden">
               <div className="space-y-3">
                 {getListenConversation(selectedHistory).map((entry, index) => {
                   const entryKey = `${selectedHistory.id}-${index}`;
                   const isEntryNarrating = isNarrating && activeNarrationKey === entryKey;
                   return (
-                  <div key={`${entry.role}-${index}`} className={`p-3 rounded-xl border ${entry.role === 'user' ? 'border-[var(--border)] bg-[var(--surface-strong)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
+                  <div key={`${entry.role}-${index}`} className={`p-3 rounded-xl border text-sm ${entry.role === 'user' ? 'border-[var(--border)] bg-[var(--surface-strong)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
                     <p className="text-[11px] uppercase tracking-widest text-[var(--muted)] mb-2">{entry.role === 'user' ? 'You' : 'Narrator'}</p>
-                    <div className="text-sm text-[var(--foreground)]">
+                    <div className="text-[var(--foreground)] break-words">
                       {entry.role === 'assistant' ? (
                         <>
-                          <span className="whitespace-pre-line">{sanitizeNarrationForDisplay(entry.content)}</span>
+                          <span className="whitespace-pre-line text-xs sm:text-sm">{sanitizeNarrationForDisplay(entry.content)}</span>
                           {selectedHistory.referencesHtml && index === getListenConversation(selectedHistory).filter(e => e.role === 'assistant').length - 1 && (
                             <div className="mt-3">
                               <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] mb-2">References</p>
-                              <div dangerouslySetInnerHTML={{ __html: selectedHistory.referencesHtml }} />
+                              <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: selectedHistory.referencesHtml }} />
                             </div>
                           )}
                         </>
                       ) : (
-                        <span className="whitespace-pre-line">{entry.content}</span>
+                        <span className="whitespace-pre-line text-xs sm:text-sm">{entry.content}</span>
                       )}
                       {entry.role === 'assistant' && (
                         <button
@@ -3560,6 +3985,30 @@ export default function HomeView() {
             </div>
           </div>
         </div>
+      )}
+
+      {mediaDialog && (
+        <MediaEditorDialog
+          open={mediaDialog.open}
+          onOpenChange={(open) => {
+            if (!open) {
+              setMediaDialog(null);
+              return;
+            }
+            setMediaDialog((prev) => (prev ? { ...prev, open } : prev));
+          }}
+          mediaType={mediaDialog.type}
+          mediaUrl={mediaDialog.url}
+          prompt={mediaDialog.prompt}
+          onPromptChange={(value) => setMediaDialog((prev) => (prev ? { ...prev, prompt: value } : prev))}
+          onRegenerate={() => {
+            void handleMediaRegenerate();
+          }}
+          onDownload={() => {
+            void handleMediaDownload();
+          }}
+          isBusy={isMediaRegenerating}
+        />
       )}
 
     </div>

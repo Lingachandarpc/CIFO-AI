@@ -18,6 +18,14 @@ export async function generateNarrative(
       bio?: string;
     };
     recentQueries?: string[];
+    attachments?: Array<{
+      id: string;
+      name: string;
+      size: number;
+      type: string;
+      base64?: string;
+      tool: string;
+    }>;
   },
   continuation?: {
     previousNarration?: string;
@@ -156,6 +164,149 @@ export async function generateSuggestions(
   } catch (error) {
     console.error('Error generating suggestions (proxy):', error);
     return [];
+  }
+}
+
+export async function generateToolImage(
+  prompt: string,
+  model: string = 'auto',
+  sourceImageUrl?: string,
+  imageConfig?: {
+    size?: string;
+    quality?: string;
+    style?: string;
+  }
+): Promise<{ imageUrl?: string; modelUsed?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/ai-tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'image',
+        prompt,
+        options: {
+          model,
+          n: 1,
+          size: imageConfig?.size || '1024x1024',
+          quality: imageConfig?.quality || 'standard',
+          style: imageConfig?.style || 'natural',
+          ...(sourceImageUrl ? { sourceImageUrl } : {}),
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return { error: data?.error || 'Image generation failed' };
+    }
+
+    const imageUrl = data?.data?.images?.[0]?.url as string | undefined;
+    const modelUsed = data?.data?.model as string | undefined;
+
+    if (!imageUrl) {
+      return { error: 'No image URL returned from provider' };
+    }
+
+    return { imageUrl, modelUsed };
+  } catch (error) {
+    console.error('Error generating tool image:', error);
+    return { error: 'Image generation service is unavailable right now.' };
+  }
+}
+
+export async function generateToolVideo(
+  prompt: string,
+  model: string = 'auto',
+  videoConfig?: {
+    duration?: number;
+    resolution?: string;
+    aspectRatio?: string;
+  }
+): Promise<{ videoUrl?: string; modelUsed?: string; status?: string; error?: string; operationId?: string; videoId?: string; provider?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/ai-tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'video',
+        prompt,
+        options: {
+          model,
+          duration: videoConfig?.duration || 5,
+          resolution: videoConfig?.resolution || '1080p',
+          aspectRatio: videoConfig?.aspectRatio || '16:9',
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return { error: data?.error || 'Video generation failed' };
+    }
+
+    const result = {
+      videoUrl: data?.data?.videoUrl as string | undefined,
+      modelUsed: data?.data?.model as string | undefined,
+      status: data?.data?.status as string | undefined,
+      operationId: data?.data?.operationId as string | undefined,
+      videoId: data?.data?.videoId as string | undefined,
+      provider: data?.provider as string | undefined,
+    };
+
+    console.log('[generateToolVideo] Initial response:', JSON.stringify(result).substring(0, 200));
+    return result;
+  } catch (error) {
+    console.error('Error generating tool video:', error);
+    return { error: 'Video generation service is unavailable right now.' };
+  }
+}
+
+export async function pollToolVideoStatus(
+  options: {
+    model?: string;
+    provider?: string;
+    operationId?: string;
+    videoId?: string;
+  }
+): Promise<{ videoUrl?: string; modelUsed?: string; status?: string; error?: string; operationId?: string; videoId?: string; provider?: string }> {
+  try {
+    console.log('[pollToolVideoStatus] Polling with:', JSON.stringify(options).substring(0, 200));
+
+    const res = await fetch(`${API_BASE}/ai-tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'video',
+        prompt: 'status-check',
+        options: {
+          model: options.model || 'auto',
+          provider: options.provider,
+          operationId: options.operationId,
+          videoId: options.videoId,
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      console.log('[pollToolVideoStatus] Poll failed:', data?.error);
+      return { error: data?.error || 'Video status check failed' };
+    }
+
+    const result = {
+      videoUrl: data?.data?.videoUrl as string | undefined,
+      modelUsed: data?.data?.model as string | undefined,
+      status: data?.data?.status as string | undefined,
+      operationId: data?.data?.operationId as string | undefined,
+      videoId: data?.data?.videoId as string | undefined,
+      provider: data?.provider as string | undefined,
+    };
+
+    console.log('[pollToolVideoStatus] Poll result:', JSON.stringify(result).substring(0, 200));
+    return result;
+  } catch (error) {
+    console.error('Error polling tool video status:', error);
+    return { error: 'Video status service is unavailable right now.' };
   }
 }
 
