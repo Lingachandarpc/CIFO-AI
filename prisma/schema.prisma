@@ -17,12 +17,19 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Freemium token system
+  tokenBudget    Int      @default(50000)   // Monthly token allowance (free tier: 50k)
+  tokensUsed     Int      @default(0)       // Tokens used in current period
+  tier           String   @default("free")  // free, pro, enterprise
+  periodStart    DateTime @default(now())   // Current billing period start
+
   // Relations
   accounts         Account[]
   sessions         Session[]
   profile          UserProfile?
   settings         UserSettings?
   chatHistory      ChatHistory[]
+  tokenUsage       TokenUsageLog[]
 }
 
 model Account {
@@ -149,4 +156,23 @@ model UserInsight {
   updatedAt       DateTime @updatedAt
 
   @@index([userId])
+}
+
+// Token Usage Log - Per-request token tracking for freemium billing
+model TokenUsageLog {
+  id               Int      @id @default(autoincrement())
+  userId           Int
+  model            String   // e.g. "gpt-4-turbo", "gemini-1.5-flash"
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  estimatedCost    Float    @default(0) // USD
+  queryType        String?  // "text", "image", "video", "tts"
+  timestamp        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([userId, timestamp])
 }

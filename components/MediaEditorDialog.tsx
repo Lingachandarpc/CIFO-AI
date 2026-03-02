@@ -13,6 +13,7 @@ interface MediaEditorDialogProps {
   onPromptChange: (value: string) => void;
   onRegenerate: () => void;
   onDownload: () => void;
+  onCancel?: () => void;
   isBusy: boolean;
 }
 
@@ -25,40 +26,85 @@ export default function MediaEditorDialog({
   onPromptChange,
   onRegenerate,
   onDownload,
+  onCancel,
   isBusy,
 }: MediaEditorDialogProps) {
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+    }
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={(val) => {
+      // Prevent closing via overlay/escape while regenerating — use Cancel instead
+      if (isBusy && !val) return;
+      onOpenChange(val);
+    }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5 shadow-2xl">
+        <Dialog.Overlay className="fixed inset-0 z-[500] bg-black/70 backdrop-blur-sm" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-[500] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5 shadow-2xl">
           <div className="flex items-center justify-between gap-3">
             <Dialog.Title className="text-sm sm:text-base font-semibold text-[var(--foreground)]">
               {mediaType === 'image' ? 'Image Editor' : 'Video Editor'}
             </Dialog.Title>
-            <Dialog.Close asChild>
+            {!isBusy && (
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  Close
+                </button>
+              </Dialog.Close>
+            )}
+            {isBusy && (
               <button
                 type="button"
-                className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+                onClick={handleCancel}
+                className="rounded-md border border-red-500/50 px-2.5 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
               >
-                Close
+                Cancel
               </button>
-            </Dialog.Close>
+            )}
           </div>
 
-          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] overflow-hidden">
+          {/* Media preview with scanning loader overlay */}
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] overflow-hidden relative">
             {mediaType === 'image' ? (
               <img
                 src={mediaUrl}
                 alt="Generated"
-                className="w-full max-h-[56vh] object-contain"
+                className={`w-full max-h-[56vh] object-contain transition-opacity duration-300 ${isBusy ? 'opacity-40' : 'opacity-100'}`}
               />
             ) : (
               <video
                 src={mediaUrl}
-                controls
-                className="w-full max-h-[56vh]"
+                controls={!isBusy}
+                className={`w-full max-h-[56vh] transition-opacity duration-300 ${isBusy ? 'opacity-40' : 'opacity-100'}`}
               />
+            )}
+
+            {/* Scanner loader overlay */}
+            {isBusy && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                {/* Grid pattern */}
+                <div className="absolute inset-0 opacity-20"
+                  style={{
+                    backgroundImage: `linear-gradient(var(--foreground) 1px, transparent 1px), linear-gradient(90deg, var(--foreground) 1px, transparent 1px)`,
+                    backgroundSize: '40px 40px',
+                  }}
+                />
+                {/* Scanning line animation */}
+                <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-lime-400 to-transparent animate-media-scan" />
+                {/* Center label */}
+                <div className="relative z-10 flex flex-col items-center gap-2">
+                  <div className="w-8 h-8 border-2 border-lime-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs uppercase tracking-widest text-lime-400 font-semibold">
+                    Regenerating
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 
@@ -69,7 +115,8 @@ export default function MediaEditorDialog({
             <textarea
               value={prompt}
               onChange={(e) => onPromptChange(e.target.value)}
-              className="w-full min-h-24 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)] focus:outline-none"
+              disabled={isBusy}
+              className="w-full min-h-24 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)] focus:outline-none disabled:opacity-50"
               placeholder={mediaType === 'image' ? 'Refine this image prompt...' : 'Refine this video prompt...'}
             />
           </div>
@@ -78,7 +125,8 @@ export default function MediaEditorDialog({
             <button
               type="button"
               onClick={onDownload}
-              className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs sm:text-sm text-[var(--foreground)] hover:bg-[var(--surface-strong)]"
+              disabled={isBusy}
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs sm:text-sm text-[var(--foreground)] hover:bg-[var(--surface-strong)] disabled:opacity-50"
             >
               Download
             </button>

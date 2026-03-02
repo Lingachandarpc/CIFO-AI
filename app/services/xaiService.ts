@@ -132,8 +132,15 @@ export async function generateNarrativeWithWebSearch(
     };
     recentQueries?: string[];
   },
-  prefetchedWebResults?: Array<{title: string; url: string; content: string}> // NEW: Allow middleware to pass pre-fetched results
+  prefetchedWebResults?: Array<{title: string; url: string; content: string}>, // NEW: Allow middleware to pass pre-fetched results
+  selectedModel?: string
 ): Promise<{ narration: string; modelUsed: string }> {
+      const resolvedModel = (() => {
+        const requested = (selectedModel || '').toLowerCase();
+        if (requested === 'grok-1' || requested === 'grok-3') return requested;
+        return MODEL;
+      })();
+
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     return { narration: 'X.AI API key not configured', modelUsed: 'xai' };
@@ -158,7 +165,7 @@ export async function generateNarrativeWithWebSearch(
     const narrativeStyleGuide: Record<string, string> = {
       'Realistic': 'Tell the story in a realistic, factual, and grounded manner with real-world examples.',
       'Dramatic': 'Tell the story with dramatic flair, engaging tension, and emotional depth.',
-      'Educational': 'Tell the story in an educational style, focusing on learning outcomes and key insights. For READ mode, actively use tables for comparisons, sliders for scales/ratings, tabs for organizing concepts, and thoughtful emojis (3-6) to highlight key points.',
+      'Educational': 'Tell the story in an educational style, focusing on learning outcomes and key insights. In READ mode, use advanced formatting (tables/charts/tabs/progress/diagrams) only when it genuinely improves understanding.',
     };
 
     const styleInstruction = narrativeStyleGuide[narrationType] || narrativeStyleGuide['Realistic'];
@@ -177,54 +184,13 @@ export async function generateNarrativeWithWebSearch(
       ].filter(Boolean).join(', ');
     }
 
-    // READ mode format enhancements for Educational style
+    // READ mode format guidance for Educational style (conditional, not mandatory)
     const readModeFormatting = interactionMode === 'read' && narrationType === 'Educational'
       ? `
-- **Emojis**: Use 3-6 thoughtful emojis throughout to highlight key concepts and add visual interest.
-- **Charts**: Include charts for data visualization when appropriate using this format:
-  \`\`\`json-chart
-  {
-    "type": "bar",
-    "title": "Chart Title",
-    "data": [{"name": "Item", "value": 100}, ...],
-    "xAxisKey": "name",
-    "yAxisKey": "value",
-    "options": {"height": 300, "showLegend": true}
-  }
-  \`\`\`
-  Chart types: "line" (trends), "bar" (comparisons), "pie" (proportions), "area" (cumulative)
-  Use charts for: growth trends, statistical comparisons, market data, performance metrics, time series
-- **Tables**: Use fenced code block labeled \`table\` (NO markdown pipe tables). Preferred JSON format:
-  \`\`\`table
-  {
-    "title": "Comparison",
-    "columns": ["Aspect", "Option A", "Option B"],
-    "rows": [["Speed", "Fast", "Medium"], ["Cost", "High", "Low"]]
-  }
-  \`\`\`
-- **Text Illustrations**: For processes, architectures, steps, or procedures, use text-based diagrams in code blocks labeled \`diagram\`. NO blank lines before code blocks.
-- **Tabs**: Use tabbed sections in code block labeled \`tabs\`:
-  \`\`\`tabs
-  Tab: Label 1
-  Content for first tab goes here
-  Tab: Label 2
-  Content for second tab goes here
-  \`\`\`
-  Each tab starts with "Tab: LabelName" on its own line.
-- **Progress**: Use code block labeled \`progress\` for scales/ratings:
-  \`\`\`progress
-  label: Readiness
-  value: 7/10
-  left: Low
-  right: High
-  \`\`\`
-- **Games (Nanobot)**: If the user asks to play a game, says they are bored, or requests fun activities, include a playable game block:
-  \`\`\`game
-  {"type":"tic_tac_toe","title":"Tic-Tac-Toe","description":"Play directly in chat"}
-  \`\`\`
-  Allowed game types: \`tic_tac_toe\`, \`target_tap\`, \`number_hunt\`, \`memory_flip\`. If the user asks an unsupported game, suggest these available games.
-- **Structure**: Use **bold headings** to break content into scannable sections. NO blank lines between headings and their content.
-- **DO NOT USE**: Markdown pipe table syntax (\`|\`, \`---\`) and multiple consecutive newlines (\\n\\n\\n...).
+- Keep the default output clean and readable with headings + bullets.
+- Use advanced blocks (\`table\`, \`tabs\`, \`progress\`, \`json-chart\`, \`diagram\`) only when they add clear value for this specific answer.
+- Do not force all markdown block types in a single response.
+- Do not add emojis unless explicitly helpful.
 `
       : '';
 
@@ -259,7 +225,7 @@ export async function generateNarrativeWithWebSearch(
       ? '\n\nIMPORTANT: The user just provided clarification to your previous question. Use this information to answer their ORIGINAL question completely. Do not just acknowledge their response - provide the full answer they were seeking.'
       : '';
 
-    const helpfulnessGuideline = '\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n1. NEVER EVER say "I don\'t have access to real-time data" or "I can\'t check the information" or "Check a news website"\n2. When you see **Current Time**: [time] in the context below, ONLY use it if the user explicitly asked about time or mentioned specific times\n3. NEVER add greeting like "Hey [Name], it\'s currently [time] IST in [city]" unless the user directly asked about time or greeting\n4. When you see web search results below, PRIORITIZE information from trusted local news sources (BBC, Reuters, AP News, country-specific outlets)\n5. For location-specific queries (movies, news, events): First verify the location context, then provide location-relevant information. Do NOT mention the time unless user asked about it\n6. For time questions: State the EXACT time shown in **Current Time**: field. Example: "It\'s currently 11:10 PM IST in Chennai"\n7. For time-contextual questions ("is it good time for coffee?"): First state the current time from **Current Time**: field, then give recommendation\n8. For news/current events: Use web search data from trusted sources and prioritize region-specific outlets over general ones. Do NOT include time greetings\n9. ALWAYS be solution-oriented and helpful - provide actual answers with sources, not excuses\n10. Location Context: If user is in specific region (India, USA, Tamil Nadu), validate that results are relevant to that location. If results are global/irrelevant, state ONLY verified local information\n11. REALISTIC STYLE LANGUAGE: For Realistic narrations, NEVER use opening phrases like "Picture this:", "Imagine this:", "Think of it this way:", "Let me paint a picture:", "Envision:", or "Let\'s say:". Instead, get directly to the point with factual, straightforward language.\n\nTypical schedules for context: coffee good in morning (6am-11am), lunch around noon-2pm, dinner 6pm-9pm, sleep 9pm-6am';
+    const helpfulnessGuideline = '\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n1. NEVER EVER say "I don\'t have access to real-time data" or "I can\'t check the information" or "Check a news website"\n2. When you see **Current Time**: [time] in the context below, ONLY use it if the user explicitly asked about time or mentioned specific times\n3. Greeting rule: if you greet, use exactly "Hi {name}" and only once per ongoing session/topic. Never include location/city in the greeting.\n4. When you see web search results below, PRIORITIZE information from trusted local news sources (BBC, Reuters, AP News, country-specific outlets)\n5. For location-specific queries (movies, news, events): First verify the location context, then provide location-relevant information. Do NOT mention the time unless user asked about it\n6. For time questions: State the EXACT time shown in **Current Time**: field. Example: "It\'s currently 11:10 PM IST."\n7. For time-contextual questions ("is it good time for coffee?"): First state the current time from **Current Time**: field, then give recommendation\n8. For news/current events: Use web search data from trusted sources and prioritize region-specific outlets over general ones. Do NOT include time greetings\n9. ALWAYS be solution-oriented and helpful - provide actual answers with sources, not excuses\n10. Location Context: If user is in specific region (India, USA, Tamil Nadu), validate that results are relevant to that location. If results are global/irrelevant, state ONLY verified local information\n11. REALISTIC STYLE LANGUAGE: For Realistic narrations, NEVER use opening phrases like "Picture this:", "Imagine this:", "Think of it this way:", "Let me paint a picture:", "Envision:", or "Let\'s say:". Instead, get directly to the point with factual, straightforward language.\n\nTypical schedules for context: coffee good in morning (6am-11am), lunch around noon-2pm, dinner 6pm-9pm, sleep 9pm-6am';
 
     const listenModeInstructions = interactionMode === 'listen'
       ? `
@@ -356,7 +322,7 @@ ${enableWebSearch && searchContext ? '\nYou have been provided with current web 
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: resolvedModel,
         messages,
         temperature: 0.7,
         max_tokens: 2000,
@@ -393,13 +359,13 @@ ${enableWebSearch && searchContext ? '\nYou have been provided with current web 
 
     return {
       narration,
-      modelUsed: 'xai',
+      modelUsed: resolvedModel,
     };
   } catch (error) {
     console.error('Error calling X.AI with web search:', error);
     return {
       narration: 'Sorry — AI generation failed. Please try again.',
-      modelUsed: 'xai',
+      modelUsed: selectedModel || 'xai',
     };
   }
 }

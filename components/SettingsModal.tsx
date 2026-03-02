@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Language, TextToSpeechProvider, VoiceGender, AIModel } from '../app/types';
+import { Settings, Language, TextToSpeechProvider, VoiceGender } from '../app/types';
 import { getVoicesForLanguageAndGender } from '../app/services/elevenLabsService';
 
 interface SettingsModalProps {
@@ -26,32 +26,6 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
         </button>
         <h2 className="text-2xl font-bold text-[var(--foreground)] mb-6">Response Settings</h2>
 
-        {/* AI Model Selection */}
-        <div className="mb-6">
-          <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
-            AI Model
-          </label>
-          <select
-            value={settings.aiModel}
-            onChange={(e) =>
-              onSettingsChange({
-                ...settings,
-                aiModel: e.target.value as AIModel,
-              })
-            }
-            className="w-full bg-[var(--surface-strong)] text-[var(--foreground)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--muted-strong)]"
-          >
-            <option value={AIModel.AUTO}>Auto (fastest available)</option>
-            <option value={AIModel.OPENAI}>OpenAI</option>
-            <option value={AIModel.CLAUDE_SONNET}>Claude Sonnet</option>
-            <option value={AIModel.GEMINI}>Gemini</option>
-            <option value={AIModel.XAI}>xAI</option>
-          </select>
-          <p className="text-xs text-[var(--muted)] mt-1">
-            Auto picks the lowest-latency model based on recent responses.
-          </p>
-        </div>
-
         {/* Text-to-Speech Provider */}
         <div className="mb-6">
           <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">
@@ -67,12 +41,14 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
             }
             className="w-full bg-[var(--surface-strong)] text-[var(--foreground)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--muted-strong)]"
           >
+            <option value={TextToSpeechProvider.GEMINI}>Gemini (Default)</option>
             <option value={TextToSpeechProvider.ELEVENLABS}>ElevenLabs (Advanced)</option>
+            <option value={TextToSpeechProvider.GOOGLE}>Google Cloud TTS</option>
             <option value={TextToSpeechProvider.OPENAI}>OpenAI</option>
             <option value={TextToSpeechProvider.OPEN_SOURCE}>Open-source (Browser TTS)</option>
           </select>
           <p className="text-xs text-[var(--muted)] mt-1">
-            Falls back to browser TTS if cloud providers are unavailable.
+            Gemini TTS supports all languages natively. Falls back to ElevenLabs, then browser TTS.
           </p>
         </div>
 

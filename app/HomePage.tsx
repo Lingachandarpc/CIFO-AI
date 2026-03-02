@@ -19,7 +19,7 @@ export default function Home() {
     voiceType: DEFAULT_GOOGLE_VOICE,
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
-    ttsProvider: TextToSpeechProvider.GOOGLE,
+    ttsProvider: TextToSpeechProvider.GEMINI,
     aiModel: AIModel.AUTO,
     enableBackgroundMusic: true,
     backgroundMusicVolume: 0.15,
@@ -473,7 +473,7 @@ export default function Home() {
 
       {/* Settings Modal */}
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl">
             <div className="p-6 border-b border-neutral-800 flex justify-between items-center">
               <h2 className="text-xl font-bold flex items-center gap-2">

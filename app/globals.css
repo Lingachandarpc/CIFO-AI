@@ -317,6 +317,17 @@ body {
   }
 }
 
+/* Scanner animation for MediaEditorDialog regeneration */
+@keyframes media-dialog-scan {
+  0% { top: 0; }
+  50% { top: 100%; }
+  100% { top: 0; }
+}
+.animate-media-scan {
+  position: absolute;
+  animation: media-dialog-scan 2s ease-in-out infinite;
+}
+
 .listen-control:hover {
   transform: translateY(-1px);
   background: var(--surface-strong);

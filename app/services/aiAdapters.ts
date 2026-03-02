@@ -21,6 +21,7 @@ export async function geminiAdapter(
     narrationType: string;
     language: string;
     interactionMode: 'read' | 'listen';
+    selectedModel?: string;
   }
 ): Promise<string> {
   // Pass middleware's pre-fetched web results (includes WorldTimeAPI data for time queries)
@@ -33,7 +34,8 @@ export async function geminiAdapter(
     false, // Disable internal web search - middleware handles it
     context.chatHistory || [],
     { profile: context.userContext.profile },
-    context.webResults // Pass pre-fetched results from middleware
+    context.webResults, // Pass pre-fetched results from middleware
+    options.selectedModel
   );
 
   return result.narration;
@@ -51,6 +53,7 @@ export async function claudeAdapter(
     narrationType: string;
     language: string;
     interactionMode: 'read' | 'listen';
+    selectedModel?: string;
   }
 ): Promise<string> {
   // Pass middleware's pre-fetched web results (includes WorldTimeAPI data for time queries)
@@ -63,7 +66,8 @@ export async function claudeAdapter(
     false, // Middleware handles web search
     context.chatHistory || [],
     { profile: context.userContext.profile },
-    context.webResults // Pass pre-fetched results from middleware
+    context.webResults, // Pass pre-fetched results from middleware
+    options.selectedModel
   );
 
   return result.narration;
@@ -81,8 +85,14 @@ export async function xaiAdapter(
     narrationType: string;
     language: string;
     interactionMode: 'read' | 'listen';
+    selectedModel?: string;
   }
 ): Promise<string> {
+  // Pre-check: fail fast if XAI_API_KEY is not configured
+  if (!process.env.XAI_API_KEY) {
+    throw new Error('X.AI API key not configured');
+  }
+
   // Pass middleware's pre-fetched web results (includes WorldTimeAPI data for time queries)
   const result = await xaiOriginal(
     context.query,
@@ -93,8 +103,17 @@ export async function xaiAdapter(
     false, // Middleware handles web search
     context.chatHistory || [],
     { profile: context.userContext.profile },
-    context.webResults // Pass pre-fetched results from middleware
+    context.webResults, // Pass pre-fetched results from middleware
+    options.selectedModel
   );
+
+  // Detect error responses returned as narration text
+  if (
+    result.narration.startsWith('X.AI API key not configured') ||
+    result.narration.startsWith('X.AI error')
+  ) {
+    throw new Error(result.narration);
+  }
 
   return result.narration;
 }
@@ -111,6 +130,7 @@ export async function openaiAdapter(
     narrationType: string;
     language: string;
     interactionMode: 'read' | 'listen';
+    selectedModel?: string;
   }
 ): Promise<string> {
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -192,7 +212,7 @@ export async function openaiAdapter(
     ? '\n\nIMPORTANT: The user just provided clarification to your previous question. Use this information to answer their ORIGINAL question completely. Do not just acknowledge their response - provide the full answer they were seeking.'
     : '';
 
-  const helpfulnessGuideline = '\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n1. NEVER EVER say "I don\'t have access to real-time data" or "I can\'t check the information" or "Check a news website"\n2. When you see **Current Time**: [time] in the context below, that IS the real current time - USE IT DIRECTLY\n3. When you see web search results below, PRIORITIZE information from trusted local news sources (BBC, Reuters, AP News, country-specific outlets)\n4. For location-specific queries (movies, news, events, doomsday predictions): First verify the location context, then provide location-relevant information\n5. For time questions: State the EXACT time shown in **Current Time**: field. Example: "It\'s currently 9:57 PM IST in Chennai"\n6. For time-contextual questions ("is it good time for coffee?"): First state the current time from **Current Time**: field, then give recommendation\n7. For news/current events: Use web search data from trusted sources and prioritize region-specific outlets over general ones\n8. ALWAYS be solution-oriented and helpful - provide actual answers with sources, not excuses\n9. Location Context: If user is in specific region (India, USA, Tamil Nadu), validate that results are relevant to that location. If results are global/irrelevant, state ONLY verified local information\n\nTypical schedules for context: coffee good in morning (6am-11am), lunch around noon-2pm, dinner 6pm-9pm, sleep 9pm-6am';
+  const helpfulnessGuideline = '\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n1. NEVER EVER say "I don\'t have access to real-time data" or "I can\'t check the information" or "Check a news website"\n2. When you see **Current Time**: [time] in the context below, that IS the real current time - USE IT DIRECTLY\n3. Greeting rule: if you greet, use exactly "Hi {name}" and only once per ongoing session/topic. Never include location/city in the greeting.\n4. When you see web search results below, PRIORITIZE information from trusted local news sources (BBC, Reuters, AP News, country-specific outlets)\n5. For location-specific queries (movies, news, events, doomsday predictions): First verify the location context, then provide location-relevant information\n6. For time questions: State the EXACT time shown in **Current Time**: field. Example: "It\'s currently 9:57 PM IST."\n7. For time-contextual questions ("is it good time for coffee?"): First state the current time from **Current Time**: field, then give recommendation\n8. For news/current events: Use web search data from trusted sources and prioritize region-specific outlets over general ones\n9. ALWAYS be solution-oriented and helpful - provide actual answers with sources, not excuses\n10. Location Context: If user is in specific region (India, USA, Tamil Nadu), validate that results are relevant to that location. If results are global/irrelevant, state ONLY verified local information\n\nTypical schedules for context: coffee good in morning (6am-11am), lunch around noon-2pm, dinner 6pm-9pm, sleep 9pm-6am';
 
   const isListenMode = options.interactionMode === 'listen';
   const readModeComponentGuide = !isListenMode
@@ -276,8 +296,21 @@ ${webContext ? '\nYou have been provided with current web search results from th
     },
   ];
 
+  const selectedOpenAIModel = (() => {
+    switch ((options.selectedModel || '').toLowerCase()) {
+      case 'gpt-3.5':
+      case 'gpt-3.5-turbo':
+        return 'gpt-3.5-turbo';
+      case 'gpt-4':
+      case 'gpt-4-turbo':
+        return 'gpt-4-turbo';
+      default:
+        return 'gpt-4o-mini';
+    }
+  })();
+
   const res = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: selectedOpenAIModel,
     messages,
   });
 

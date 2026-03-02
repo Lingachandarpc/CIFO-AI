@@ -34,7 +34,7 @@ export async function GET() {
           voiceType: DEFAULT_GOOGLE_VOICE,
           voiceGender: 'auto',
           language: 'English',
-          ttsProvider: TextToSpeechProvider.GOOGLE,
+          ttsProvider: TextToSpeechProvider.GEMINI,
           aiModel: 'auto',
           enableBackgroundMusic: false,
           backgroundMusicVolume: 0.15,

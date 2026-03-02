@@ -9,10 +9,12 @@ import { SearchMode, Settings, ChatMessage, HistoryItem, HistoryConversationEntr
 import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon, VolumeIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
 import SearchBar, { type AttachedFile } from '../components/SearchBar';
-import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus } from './services/openaiService';
+import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus, generateToolDocument, generateToolDashboard } from './services/openaiService';
 import MediaEditorDialog from '../components/MediaEditorDialog';
+import DashboardDialog from '../components/DashboardDialog';
 import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
 import { filterVoicesByGender, generateSpeechWithGoogle, getGoogleLanguageCode, listGoogleVoices, resolveGoogleVoice, GoogleVoice } from './services/googleTtsService';
+import { generateSpeechWithGemini } from './services/geminiTtsService';
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
 import NanobotCanvas from '../components/NanobotCanvas';
 import ThemeSphere from '../components/ThemeSphere';
@@ -25,6 +27,12 @@ type MediaDialogState = {
   url: string;
   prompt: string;
   modelUsed?: string;
+};
+
+type DashboardDialogState = {
+  open: boolean;
+  url: string;
+  title?: string;
 };
 
 const AVAILABLE_GAMES = [
@@ -137,7 +145,9 @@ export default function HomeView() {
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [mediaDialog, setMediaDialog] = useState<MediaDialogState | null>(null);
+  const [dashboardDialog, setDashboardDialog] = useState<DashboardDialogState | null>(null);
   const [isMediaRegenerating, setIsMediaRegenerating] = useState(false);
+  const mediaRegenAbortRef = useRef<AbortController | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.CASE_STUDY);
   const [interactionMode, setInteractionMode] = useState<"read" | "listen">("read");
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -165,7 +175,7 @@ export default function HomeView() {
     voiceType: DEFAULT_GOOGLE_VOICE,
     voiceGender: VoiceGender.AUTO,
     language: Language.ENGLISH,
-    ttsProvider: TextToSpeechProvider.GOOGLE,
+    ttsProvider: TextToSpeechProvider.GEMINI,
     aiModel: AIModel.AUTO,
     enableBackgroundMusic: false,
     backgroundMusicVolume: 0.15,
@@ -353,7 +363,8 @@ export default function HomeView() {
       };
 
       recognitionRef.current.onresult = (event) => {
-        const transcript = event.results?.[0]?.[0]?.transcript || '';
+        const lastIdx = event.results.length - 1;
+        const transcript = event.results?.[lastIdx]?.[0]?.transcript || '';
         if (!transcript.trim()) return;
         if (interactionModeRef.current === "listen") {
           if (listenRequestPendingRef.current || isLoading) return;
@@ -453,11 +464,13 @@ export default function HomeView() {
           const settingsData = await settingsRes.json();
           if (settingsData.success && settingsData.settings) {
             const storedProvider = settingsData.settings.ttsProvider as TextToSpeechProvider | undefined;
-            const resolvedProvider = storedProvider === TextToSpeechProvider.OPENAI
-              ? TextToSpeechProvider.GOOGLE
+            // Migrate legacy defaults to Gemini
+            const needsMigration = storedProvider === TextToSpeechProvider.OPENAI || storedProvider === TextToSpeechProvider.GOOGLE;
+            const resolvedProvider = needsMigration
+              ? TextToSpeechProvider.GEMINI
               : Object.values(TextToSpeechProvider).includes(storedProvider as TextToSpeechProvider)
                 ? (storedProvider as TextToSpeechProvider)
-                : TextToSpeechProvider.GOOGLE;
+                : TextToSpeechProvider.GEMINI;
             setSettings((prev) => ({
               ...prev,
               aiModel:
@@ -477,11 +490,11 @@ export default function HomeView() {
               backgroundMusicVolume: settingsData.settings.backgroundMusicVolume || 0.15,
             }));
 
-            if (storedProvider === TextToSpeechProvider.OPENAI) {
+            if (needsMigration) {
               fetch('/api/chronoread/settings', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ttsProvider: TextToSpeechProvider.GOOGLE }),
+                body: JSON.stringify({ ttsProvider: TextToSpeechProvider.GEMINI }),
               }).catch((error) => console.error('Error updating TTS provider default:', error));
             }
           }
@@ -764,9 +777,27 @@ export default function HomeView() {
     return text;
   };
 
-  const getTtsExcerpt = (text: string, _mode: "read" | "listen") => {
+  const getTtsExcerpt = (text: string, mode: "read" | "listen") => {
     const cleaned = cleanTextForTts(text);
-    return cleaned || text;
+    const baseText = cleaned || text;
+
+    if (mode === 'read' && settings.narrationType === 'Educational') {
+      const normalized = baseText.replace(/\s+/g, ' ').trim();
+      if (!normalized) return baseText;
+
+      const sentences = normalized
+        .split(/(?<=[.!?])\s+/)
+        .map((sentence) => sentence.trim())
+        .filter(Boolean);
+
+      const isLongEducationalResponse = normalized.length > 900 || sentences.length > 8;
+      if (isLongEducationalResponse) {
+        const summary = sentences.slice(0, 5).join(' ');
+        return summary.length > 650 ? `${summary.slice(0, 650).trimEnd()}...` : summary;
+      }
+    }
+
+    return baseText;
   };
 
   const getNarrationStyleRate = (style: Settings["narrationType"]) => {
@@ -1108,12 +1139,6 @@ export default function HomeView() {
 
   const handlePlayAudio = async (base64: string, options?: { listenMode?: boolean; genre?: string | null }) => {
     initAudio();
-    if (!audioContextRef.current) return;
-    if (audioContextRef.current.state === 'suspended') {
-      try {
-        await audioContextRef.current.resume();
-      } catch {}
-    }
 
     try { window.speechSynthesis.cancel(); } catch {}
 
@@ -1124,26 +1149,16 @@ export default function HomeView() {
       currentSourceRef.current = null;
     }
 
-    const data = decodeAudio(base64);
-    const buffer = await getAudioBuffer(data, audioContextRef.current);
-    const source = audioContextRef.current.createBufferSource();
-    const analyser = audioContextRef.current.createAnalyser();
-    analyser.fftSize = 512;
-    source.buffer = buffer;
-    source.connect(analyser);
-    analyser.connect(audioContextRef.current.destination);
-    source.start(0);
-    currentSourceRef.current = source;
-    narrationAnalyserRef.current = analyser;
-    isNarratingRef.current = true;
-    setIsNarrating(true);
+    const onStarted = () => {
+      isNarratingRef.current = true;
+      setIsNarrating(true);
+      if (options?.listenMode) {
+        setListenStatus("narrating");
+        startAmbientMusic(options.genre || null);
+      }
+    };
 
-    if (options?.listenMode) {
-      setListenStatus("narrating");
-      startAmbientMusic(options.genre || null);
-    }
-
-    source.onended = () => {
+    const onEnded = () => {
       isNarratingRef.current = false;
       setIsNarrating(false);
       narrationAnalyserRef.current = null;
@@ -1152,6 +1167,44 @@ export default function HomeView() {
         setListenStatus(isMicMutedRef.current ? "idle" : "listening");
       }
     };
+
+    // Try Web Audio API first (supports analyser for waveform visualisation)
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state === 'suspended') {
+        try { await audioContextRef.current.resume(); } catch {}
+      }
+
+      try {
+        const data = decodeAudio(base64);
+        const buffer = await getAudioBuffer(data, audioContextRef.current);
+        const source = audioContextRef.current.createBufferSource();
+        const analyser = audioContextRef.current.createAnalyser();
+        analyser.fftSize = 512;
+        source.buffer = buffer;
+        source.connect(analyser);
+        analyser.connect(audioContextRef.current.destination);
+        source.start(0);
+        currentSourceRef.current = source;
+        narrationAnalyserRef.current = analyser;
+        onStarted();
+        source.onended = onEnded;
+        return; // success
+      } catch (webAudioError) {
+        console.warn('Web Audio API playback failed, falling back to HTML5 Audio:', webAudioError);
+      }
+    }
+
+    // Fallback: HTML5 Audio element
+    try {
+      const audio = new Audio(`data:audio/wav;base64,${base64}`);
+      onStarted();
+      audio.onended = onEnded;
+      audio.onerror = () => { onEnded(); };
+      await audio.play();
+    } catch (err) {
+      console.error('HTML5 Audio fallback also failed:', err);
+      onEnded();
+    }
   };
 
   const splitTextForTts = (value: string, maxChunkLength = 600) => {
@@ -1175,39 +1228,60 @@ export default function HomeView() {
 
   const playAudioChunk = async (base64: string) => {
     initAudio();
-    if (!audioContextRef.current) return;
-    if (audioContextRef.current.state === 'suspended') {
-      try {
-        await audioContextRef.current.resume();
-      } catch {}
-    }
 
-    try { window.speechSynthesis.cancel(); } catch {}
+    // Try Web Audio API first (supports analyser for visualisation)
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state === 'suspended') {
+        try { await audioContextRef.current.resume(); } catch {}
+      }
 
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {}
-      try { currentSourceRef.current.disconnect(); } catch {}
-      currentSourceRef.current = null;
-    }
+      try { window.speechSynthesis.cancel(); } catch {}
 
-    const data = decodeAudio(base64);
-    const buffer = await getAudioBuffer(data, audioContextRef.current);
-    const source = audioContextRef.current.createBufferSource();
-    const analyser = audioContextRef.current.createAnalyser();
-    analyser.fftSize = 512;
-    source.buffer = buffer;
-    source.connect(analyser);
-    analyser.connect(audioContextRef.current.destination);
-    source.start(0);
-    currentSourceRef.current = source;
-    narrationAnalyserRef.current = analyser;
-
-    await new Promise<void>((resolve) => {
-      source.onended = () => {
-        narrationAnalyserRef.current = null;
+      if (currentSourceRef.current) {
+        try { currentSourceRef.current.stop(); } catch {}
+        try { currentSourceRef.current.disconnect(); } catch {}
         currentSourceRef.current = null;
-        resolve();
-      };
+      }
+
+      try {
+        const data = decodeAudio(base64);
+        const buffer = await getAudioBuffer(data, audioContextRef.current);
+        const source = audioContextRef.current.createBufferSource();
+        const analyser = audioContextRef.current.createAnalyser();
+        analyser.fftSize = 512;
+        source.buffer = buffer;
+        source.connect(analyser);
+        analyser.connect(audioContextRef.current.destination);
+        source.start(0);
+        currentSourceRef.current = source;
+        narrationAnalyserRef.current = analyser;
+
+        await new Promise<void>((resolve) => {
+          source.onended = () => {
+            narrationAnalyserRef.current = null;
+            currentSourceRef.current = null;
+            resolve();
+          };
+        });
+        return; // success via Web Audio API
+      } catch (webAudioError) {
+        console.warn('Web Audio API playback failed, falling back to HTML5 Audio:', webAudioError);
+      }
+    }
+
+    // Fallback: HTML5 Audio element — works when decodeAudioData fails
+    await new Promise<void>((resolve, reject) => {
+      try {
+        const audio = new Audio(`data:audio/wav;base64,${base64}`);
+        audio.onended = () => resolve();
+        audio.onerror = (e) => {
+          console.error('HTML5 Audio fallback also failed:', e);
+          reject(new Error('Audio playback failed'));
+        };
+        audio.play().catch(reject);
+      } catch (err) {
+        reject(err);
+      }
     });
   };
 
@@ -1222,7 +1296,7 @@ export default function HomeView() {
     isNarratingRef.current = true;
     setIsNarrating(true);
 
-    const chunkTimeoutMs = 8000;
+    const chunkTimeoutMs = 15000;
     const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> =>
       new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('TTS timeout')), ms);
@@ -1300,16 +1374,20 @@ export default function HomeView() {
   };
 
   const getTtsProviderOrder = (provider: TextToSpeechProvider) => {
+    if (provider === TextToSpeechProvider.GEMINI) {
+      return [TextToSpeechProvider.GEMINI, TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.GOOGLE];
+    }
     if (provider === TextToSpeechProvider.GOOGLE) {
       return [TextToSpeechProvider.GOOGLE, TextToSpeechProvider.ELEVENLABS];
     }
     if (provider === TextToSpeechProvider.ELEVENLABS) {
-      return [TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.GOOGLE];
+      return [TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.GEMINI, TextToSpeechProvider.GOOGLE];
     }
     if (provider === TextToSpeechProvider.OPENAI) {
-      return [TextToSpeechProvider.OPENAI];
+      return [TextToSpeechProvider.OPENAI, TextToSpeechProvider.GEMINI];
     }
-    return [TextToSpeechProvider.GOOGLE, TextToSpeechProvider.ELEVENLABS];
+    // Default: Gemini first, ElevenLabs fallback, Google last resort
+    return [TextToSpeechProvider.GEMINI, TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.GOOGLE];
   };
 
   const generateNarrationAudio = async (text: string, voiceProfile?: VoiceProfile): Promise<string> => {
@@ -1333,6 +1411,20 @@ export default function HomeView() {
       : Math.max(0.7, Math.min(1.1, paceRate * 0.9));
 
     for (const provider of providerOrder) {
+      if (provider === TextToSpeechProvider.GEMINI) {
+        try {
+          const geminiAudio = await generateSpeechWithGemini(
+            text,
+            settings.voiceType,
+            settings.language,
+            settings.voiceGender
+          );
+          if (geminiAudio) return geminiAudio;
+        } catch (error) {
+          console.warn('Gemini TTS failed:', error);
+        }
+      }
+
       if (provider === TextToSpeechProvider.GOOGLE) {
         try {
           const googleAudio = await generateSpeechWithGoogle(
@@ -1565,17 +1657,62 @@ export default function HomeView() {
     setSelectedHistoryId(null);
   };
 
-  const startNewChatSession = useCallback(() => {
+  const startNewChatSession = useCallback((resetTool: boolean = true) => {
     resetMessageUiState();
     stopNarrationForUiChange();
     activeReadSessionIdRef.current = null;
     setMessages([]);
     setInputValue('');
+    if (resetTool) {
+      setSelectedTool(null);
+    }
     setReadSuggestions([]);
     setSelectedHistory(null);
     setSelectedHistoryId(null);
     setIsMobileJumpOpen(false);
   }, [resetMessageUiState, stopNarrationForUiChange]);
+
+  const detectRequestedDocumentFormat = (query: string): 'pdf' | 'docx' | 'xlsx' | 'markdown' => {
+    const lower = query.toLowerCase();
+    if (/(\bdocx\b|\bword\b|\bdoc\b)/i.test(lower)) return 'docx';
+    if (/(\bxlsx\b|\bexcel\b|spreadsheet|worksheet|table file)/i.test(lower)) return 'xlsx';
+    if (/(\bmd\b|markdown)/i.test(lower)) return 'markdown';
+    return 'pdf';
+  };
+
+  const parseRequestedFileSizeKB = (query: string): number | undefined => {
+    const match = query.match(/(\d+(?:\.\d+)?)\s*(kb|mb|gb)\b/i);
+    if (!match) return undefined;
+    const value = Number(match[1]);
+    const unit = (match[2] || '').toLowerCase();
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    if (unit === 'gb') return Math.round(value * 1024 * 1024);
+    if (unit === 'mb') return Math.round(value * 1024);
+    return Math.round(value);
+  };
+
+  const decodeAttachmentText = (file: { name: string; base64?: string }): string | null => {
+    if (!file.base64) return null;
+    const lowerName = file.name.toLowerCase();
+    if (!/(\.txt|\.md|\.csv|\.json|\.log)$/i.test(lowerName)) return null;
+    try {
+      const binary = atob(file.base64);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      return decoded.slice(0, 12000);
+    } catch {
+      return null;
+    }
+  };
+
+  const triggerBase64FileDownload = (base64Data: string, fileName: string, mimeType: string) => {
+    const anchor = document.createElement('a');
+    anchor.href = `data:${mimeType};base64,${base64Data}`;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  };
 
   const isGenericQuery = (value: string) => {
     const cleaned = value.trim().toLowerCase();
@@ -1625,13 +1762,7 @@ export default function HomeView() {
       .replace(/Voice\s+Profile:[\s\S]*$/gi, '')
       .replace(/\r\n/g, '\n');
 
-    const withoutTabsAndSliderMarkdown = settings.narrationType === 'Educational'
-      ? withoutMetadata
-          .replace(/```tabs\s*([\s\S]*?)```/gi, (_match, raw) => String(raw || '').trim())
-          .replace(/```slider\s*([\s\S]*?)```/gi, (_match, raw) => String(raw || '').trim())
-      : withoutMetadata;
-
-    return withoutTabsAndSliderMarkdown.trim();
+    return withoutMetadata.trim();
   };
 
   /**
@@ -1879,30 +2010,45 @@ export default function HomeView() {
     };
 
     setMessages(prev => [...prev, newUserMsg]);
-    setSelectedHistoryId(historyId);
+    const shouldPersistToolSession = !['dashboard', 'ocr', 'document'].includes(selectedTool || '');
+
+    if (shouldPersistToolSession) {
+      setSelectedHistoryId(historyId);
+    } else {
+      setSelectedHistoryId(null);
+    }
     setSelectedHistory(null);
 
-    const existingItem = history.find((entry) => entry.id === historyId);
-    const existingConversation: HistoryConversationEntry[] = existingItem?.conversation?.map((entry) => ({
-      ...entry,
-      role: entry.role as 'user' | 'assistant',
-    })) || [];
+    const existingItem = shouldPersistToolSession
+      ? history.find((entry) => entry.id === historyId)
+      : undefined;
+    const existingConversation: HistoryConversationEntry[] = shouldPersistToolSession
+      ? (existingItem?.conversation?.map((entry) => ({
+          ...entry,
+          role: entry.role as 'user' | 'assistant',
+        })) || [])
+      : [];
 
-    const pendingHistoryItem: HistoryItem = {
-      id: historyId,
-      query: existingItem?.query || userQuery,
-      mode: currentMode,
-      interactionMode: "read",
-      timestamp: requestTimestamp,
-      response: undefined,
-      audioBlob: undefined,
-      modelUsed: existingItem?.modelUsed,
-      suggestions: existingItem?.suggestions,
-      conversation: [...existingConversation, { role: 'user', content: userQuery, timestamp: requestTimestamp }],
-    };
-    upsertHistoryItem(pendingHistoryItem);
+    const pendingHistoryItem: HistoryItem | null = shouldPersistToolSession
+      ? {
+          id: historyId,
+          query: existingItem?.query || userQuery,
+          mode: currentMode,
+          interactionMode: "read",
+          timestamp: requestTimestamp,
+          response: undefined,
+          audioBlob: undefined,
+          modelUsed: existingItem?.modelUsed,
+          suggestions: existingItem?.suggestions,
+          conversation: [...existingConversation, { role: 'user', content: userQuery, timestamp: requestTimestamp }],
+        }
+      : null;
 
-    if (isAuthenticated) {
+    if (pendingHistoryItem) {
+      upsertHistoryItem(pendingHistoryItem);
+    }
+
+    if (shouldPersistToolSession && isAuthenticated) {
       fetch('/api/chronoread/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1945,7 +2091,9 @@ export default function HomeView() {
           };
         } else {
           const videoConfig = JSON.parse(sessionStorage.getItem('videoConfig') || '{}');
-          const videoResponse = await generateToolVideo(userQuery, selectedModel, videoConfig);
+          // Default to Gemini Veo for video generation (best quality + availability)
+          const videoModel = selectedModel === 'auto' ? 'veo-2.0-generate-001' : selectedModel;
+          const videoResponse = await generateToolVideo(userQuery, videoModel, videoConfig);
 
           let resolvedVideoResponse = videoResponse;
           if (!videoResponse.videoUrl && (videoResponse.operationId || videoResponse.videoId) && (videoResponse.status === 'processing' || !videoResponse.error)) {
@@ -1955,7 +2103,7 @@ export default function HomeView() {
               await new Promise((resolve) => setTimeout(resolve, 5000));
               
               const polled = await pollToolVideoStatus({
-                model: selectedModel,
+                model: videoModel,
                 provider: videoResponse.provider,
                 operationId: videoResponse.operationId,
                 videoId: videoResponse.videoId,
@@ -2007,22 +2155,24 @@ export default function HomeView() {
 
         setMessages((prev) => [...prev, assistantMsg]);
 
-        const updatedHistoryItem: HistoryItem = {
-          ...pendingHistoryItem,
-          response: assistantMsg.content,
-          conversation: [
-            ...(pendingHistoryItem.conversation || []),
-            {
-              role: 'assistant',
-              content: assistantMsg.content,
-              timestamp: assistantTimestamp,
-              media: assistantMsg.media,
-            },
-          ],
-        };
-        upsertHistoryItem(updatedHistoryItem);
+        if (pendingHistoryItem) {
+          const updatedHistoryItem: HistoryItem = {
+            ...pendingHistoryItem,
+            response: assistantMsg.content,
+            conversation: [
+              ...(pendingHistoryItem.conversation || []),
+              {
+                role: 'assistant',
+                content: assistantMsg.content,
+                timestamp: assistantTimestamp,
+                media: assistantMsg.media,
+              },
+            ],
+          };
+          upsertHistoryItem(updatedHistoryItem);
+        }
 
-        if (isAuthenticated) {
+        if (shouldPersistToolSession && isAuthenticated) {
           fetch('/api/chronoread/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2051,6 +2201,183 @@ export default function HomeView() {
       return;
     }
 
+    if (selectedTool === 'document') {
+      setIsLoading(true);
+      try {
+        const requestedFormat = detectRequestedDocumentFormat(userQuery);
+        const requestedSizeKB = parseRequestedFileSizeKB(userQuery);
+
+        const extractedAttachmentText = attachments
+          .map((attachment) => {
+            const text = decodeAttachmentText(attachment);
+            if (!text) return '';
+            return `\n\n[Attachment: ${attachment.name}]\n${text}`;
+          })
+          .filter(Boolean)
+          .join('');
+
+        const reportPrompt = requestedFormat === 'xlsx'
+          ? `${userQuery}
+
+      You are generating data for spreadsheet export.
+      Requirements:
+      - Return ONLY tabular data as a markdown table.
+      - First row must be column headers relevant to the request.
+      - Include only requested list data (no report sections, no executive summary, no recommendations).
+      - Keep each row concise and factual.
+      - If attachments are provided, extract list/table rows from them.
+      ${extractedAttachmentText}`
+          : `${userQuery}
+
+      You are generating a research-grade report document.
+      Requirements:
+      - Include: Title, Executive Summary, Method/Approach, Findings, Comparative Table, Chart Insights, Recommendations, and Conclusion.
+      - Keep formatting clear and professional with strong indentation and section hierarchy.
+      - If attachments are provided, analyze them and include their insights in the report.
+      - Ensure content is export-ready for ${requestedFormat.toUpperCase()} generation.
+      ${requestedSizeKB ? `- Target file size: approximately ${requestedSizeKB} KB while preserving quality.` : ''}
+      ${extractedAttachmentText}`;
+
+        const docNarrative = await generateNarrative(
+          reportPrompt,
+          currentMode,
+          settings,
+          [...messages.slice(-5), newUserMsg].map((m) => ({ role: m.role, content: m.content })),
+          'read',
+          {
+            profile: userProfile || undefined,
+            recentQueries: history.slice(0, 8).map((item) => item.query),
+            attachments,
+          },
+          undefined,
+          selectedModel
+        );
+
+        const generatedDocContent = (docNarrative.narration || '').trim();
+        const isNarrativeUnavailable =
+          /\bsorry\b/i.test(generatedDocContent) &&
+          /(unavailable|encountered an error|failed|try again)/i.test(generatedDocContent) &&
+          generatedDocContent.length < 280;
+
+        if (!generatedDocContent || isNarrativeUnavailable) {
+          const assistantMsg: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: 'Document generation failed: AI content is unavailable right now. Please try again in a moment.',
+            timestamp: new Date(),
+            animate: interactionModeRef.current === 'read',
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          return;
+        }
+
+        const docResult = await generateToolDocument(
+          generatedDocContent,
+          selectedModel,
+          attachments,
+          {
+            format: requestedFormat,
+            title: userQuery.slice(0, 80) || 'Research Report',
+            style: 'professional',
+            targetFileSizeKB: requestedSizeKB,
+            fileName: `report-${Date.now()}.${requestedFormat === 'markdown' ? 'md' : requestedFormat}`,
+          }
+        );
+
+        const assistantTimestamp = new Date();
+        let assistantContent = 'I could not generate the document right now. Please try again.';
+        if (docResult.fileBase64 && docResult.fileName && docResult.mimeType) {
+          triggerBase64FileDownload(docResult.fileBase64, docResult.fileName, docResult.mimeType);
+          assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}) and downloaded.`;
+          if (docResult.summary) {
+            assistantContent += `\n\n${docResult.summary}`;
+          }
+        } else if (docResult.error) {
+          assistantContent = `Document generation failed: ${docResult.error}`;
+        }
+
+        const assistantMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: assistantContent,
+          timestamp: assistantTimestamp,
+          animate: interactionModeRef.current === 'read',
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (error) {
+        console.error('Document session failed:', error);
+        const errorMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: 'I ran into an error while generating the document. Please try again.',
+          timestamp: new Date(),
+          animate: interactionModeRef.current === 'read',
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } finally {
+        setIsLoading(false);
+      }
+
+      return;
+    }
+
+    if (selectedTool === 'dashboard') {
+      setIsLoading(true);
+      try {
+        const dashboardPrompt = `${userQuery.trim() || 'Create a responsive business dashboard from the uploaded data.'}
+
+Dashboard rules:
+- If the user gives specific dashboard requirements, follow them.
+- If no specific requirement is given, apply a generic executive preset with KPI cards, chart area, and a detailed data table.
+- Keep layout responsive for full-window dialog view.`;
+
+        const dashboardResult = await generateToolDashboard(dashboardPrompt, attachments);
+
+        const assistantTimestamp = new Date();
+        let assistantContent = 'Dashboard creation failed. Please upload data and try again.';
+        let dashboardPayload: ChatMessage['dashboard'] | undefined;
+
+        if (dashboardResult.htmlBase64) {
+          const binary = atob(dashboardResult.htmlBase64);
+          const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+          const blob = new Blob([bytes], { type: 'text/html' });
+          const dashboardUrl = URL.createObjectURL(blob);
+          assistantContent = '✅ Dashboard ready. Click the preview below to open the interactive dashboard.';
+          dashboardPayload = {
+            url: dashboardUrl,
+            title: dashboardResult.title || 'Dashboard',
+            summary: dashboardResult.summary,
+          };
+        } else if (dashboardResult.error) {
+          assistantContent = `Dashboard creation failed: ${dashboardResult.error}`;
+        }
+
+        const assistantMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: assistantContent,
+          timestamp: assistantTimestamp,
+          animate: interactionModeRef.current === 'read',
+          dashboard: dashboardPayload,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (error) {
+        console.error('Dashboard session failed:', error);
+        const errorMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: 'I ran into an error while creating the dashboard. Please try again.',
+          timestamp: new Date(),
+          animate: interactionModeRef.current === 'read',
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } finally {
+        setIsLoading(false);
+      }
+
+      return;
+    }
+
     if (interactionModeRef.current === 'read' && isGameIntent(userQuery)) {
       const localGame = buildLocalGameResponse(userQuery);
       const assistantContent = localGame.content.trim();
@@ -2065,20 +2392,22 @@ export default function HomeView() {
 
       setMessages((prev) => [...prev, assistantMsg]);
 
-      const updatedHistoryItem: HistoryItem = {
-        ...pendingHistoryItem,
-        response: assistantContent,
-        suggestions: localGame.suggestions,
-        suggestion: localGame.suggestions[0],
-        conversation: [
-          ...(pendingHistoryItem.conversation || []),
-          { role: 'assistant', content: assistantContent, timestamp: assistantTimestamp },
-        ],
-      };
-      upsertHistoryItem(updatedHistoryItem);
+      if (pendingHistoryItem) {
+        const updatedHistoryItem: HistoryItem = {
+          ...pendingHistoryItem,
+          response: assistantContent,
+          suggestions: localGame.suggestions,
+          suggestion: localGame.suggestions[0],
+          conversation: [
+            ...(pendingHistoryItem.conversation || []),
+            { role: 'assistant', content: assistantContent, timestamp: assistantTimestamp },
+          ],
+        };
+        upsertHistoryItem(updatedHistoryItem);
+      }
       setReadSuggestions(localGame.suggestions);
 
-      if (isAuthenticated) {
+      if (shouldPersistToolSession && isAuthenticated) {
         fetch('/api/chronoread/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2118,7 +2447,9 @@ export default function HomeView() {
           profile: userProfile || undefined,
           recentQueries: history.slice(0, 8).map((item) => item.query),
           attachments: attachments, // Pass attachments to the service
-        }
+        },
+        undefined,
+        selectedModel
       );
       const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
       if (resolvedModel) {
@@ -2141,32 +2472,37 @@ export default function HomeView() {
         timestamp: new Date(),
         audioBlob: undefined,
         modelUsed: resolvedModel || undefined,
+        tokenUsage: narrativeResponse.tokenUsage || undefined,
         animate: interactionModeRef.current === "read",
         referencesHtml: narrativeResponse.referencesHtml,
       };
 
       setMessages(prev => [...prev, assistantMsg]);
 
-      const updatedHistoryItem: HistoryItem = {
-        ...pendingHistoryItem,
-        response: cleanedText,
-        suggestions: baseSuggestions,
-        suggestion: baseSuggestions[0],
-        modelUsed: resolvedModel || pendingHistoryItem.modelUsed,
-        referencesHtml: narrativeResponse.referencesHtml,
-        conversation: [
-          ...(pendingHistoryItem.conversation || []),
-          { role: 'assistant', content: cleanedText, timestamp: new Date() },
-        ],
-      };
-      upsertHistoryItem(updatedHistoryItem);
+      const updatedHistoryItem: HistoryItem | null = pendingHistoryItem
+        ? {
+            ...pendingHistoryItem,
+            response: cleanedText,
+            suggestions: baseSuggestions,
+            suggestion: baseSuggestions[0],
+            modelUsed: resolvedModel || pendingHistoryItem.modelUsed,
+            referencesHtml: narrativeResponse.referencesHtml,
+            conversation: [
+              ...(pendingHistoryItem.conversation || []),
+              { role: 'assistant' as const, content: cleanedText, timestamp: new Date() },
+            ],
+          }
+        : null;
+      if (updatedHistoryItem) {
+        upsertHistoryItem(updatedHistoryItem);
+      }
 
       if (currentMode === SearchMode.BOOK && shouldSwitchFromBookResponse(cleanedText)) {
         setSearchMode(SearchMode.CASE_STUDY);
       }
 
       // Save assistant message to database if authenticated
-      if (isAuthenticated) {
+      if (shouldPersistToolSession && isAuthenticated) {
         fetch('/api/chronoread/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2192,11 +2528,14 @@ export default function HomeView() {
 
         if (mergedSuggestions.length > 0) {
           setReadSuggestions(mergedSuggestions);
-          upsertHistoryItem({
-            ...updatedHistoryItem,
-            suggestions: mergedSuggestions,
-            suggestion: mergedSuggestions[0],
-          });
+          if (updatedHistoryItem) {
+            const suggestionHistoryItem: HistoryItem = {
+              ...updatedHistoryItem,
+              suggestions: mergedSuggestions,
+              suggestion: mergedSuggestions[0],
+            };
+            upsertHistoryItem(suggestionHistoryItem);
+          }
         }
       })();
 
@@ -2230,7 +2569,9 @@ export default function HomeView() {
   const handleToolSelect = (tool: string) => {
     // Create a new session with tool heading
     setSelectedTool(tool);
-    startNewChatSession();
+    setSelectedModel('auto');
+    setSettings((prev) => ({ ...prev, aiModel: AIModel.AUTO }));
+    startNewChatSession(false);
     
     // Add tool context heading
     const toolHeadings: Record<string, string> = {
@@ -2252,9 +2593,21 @@ export default function HomeView() {
     setMessages([toolMsg]);
   };
 
+  const mapSelectedModelToProvider = (model: string): AIModel => {
+    if (model === 'auto') return AIModel.AUTO;
+    if (model.startsWith('gpt-')) return AIModel.OPENAI;
+    if (model.startsWith('claude-')) return AIModel.CLAUDE_SONNET;
+    if (model.startsWith('gemini-') || model.startsWith('imagen-') || model.startsWith('veo-')) return AIModel.GEMINI;
+    if (model.startsWith('grok-')) return AIModel.XAI;
+    return AIModel.AUTO;
+  };
+
   const handleModelChange = (model: string) => {
     setSelectedModel(model);
-    // Settings are auto-saved based on the model selection
+    setSettings((prev) => ({
+      ...prev,
+      aiModel: mapSelectedModelToProvider(model),
+    }));
   };
 
   const openMediaDialog = (message: ChatMessage) => {
@@ -2265,6 +2618,15 @@ export default function HomeView() {
       url: message.media.url,
       prompt: message.media.prompt,
       modelUsed: message.media.modelUsed,
+    });
+  };
+
+  const openDashboardDialog = (message: ChatMessage) => {
+    if (!message.dashboard?.url) return;
+    setDashboardDialog({
+      open: true,
+      url: message.dashboard.url,
+      title: message.dashboard.title || 'AI Dashboard',
     });
   };
 
@@ -2306,11 +2668,14 @@ export default function HomeView() {
   const handleMediaRegenerate = async () => {
     if (!mediaDialog?.prompt.trim()) return;
 
+    const abortController = new AbortController();
+    mediaRegenAbortRef.current = abortController;
     setIsMediaRegenerating(true);
     try {
       if (mediaDialog.type === 'image') {
         const imageConfig = JSON.parse(sessionStorage.getItem('imageConfig') || '{}');
         const regenerated = await generateToolImage(mediaDialog.prompt, selectedModel, mediaDialog.url, imageConfig);
+        if (abortController.signal.aborted) return; // user cancelled
         if (regenerated.imageUrl) {
           const regeneratedUrl = regenerated.imageUrl;
           const assistantMsg: ChatMessage = {
@@ -2331,7 +2696,9 @@ export default function HomeView() {
         }
       } else {
         const videoConfig = JSON.parse(sessionStorage.getItem('videoConfig') || '{}');
-        const regenerated = await generateToolVideo(mediaDialog.prompt, selectedModel, videoConfig);
+        const videoModel = selectedModel === 'auto' ? 'veo-2.0-generate-001' : selectedModel;
+        const regenerated = await generateToolVideo(mediaDialog.prompt, videoModel, videoConfig);
+        if (abortController.signal.aborted) return; // user cancelled
         if (regenerated.videoUrl) {
           const regeneratedUrl = regenerated.videoUrl;
           const assistantMsg: ChatMessage = {
@@ -2352,10 +2719,24 @@ export default function HomeView() {
         }
       }
     } catch (error) {
-      console.error('Regenerate failed:', error);
+      if (!abortController.signal.aborted) {
+        console.error('Regenerate failed:', error);
+      }
     } finally {
+      mediaRegenAbortRef.current = null;
       setIsMediaRegenerating(false);
     }
+  };
+
+  const handleMediaRegenCancel = () => {
+    // Abort the in-flight regeneration
+    if (mediaRegenAbortRef.current) {
+      mediaRegenAbortRef.current.abort();
+      mediaRegenAbortRef.current = null;
+    }
+    setIsMediaRegenerating(false);
+    // Close dialog – the existing image remains in chat
+    setMediaDialog(null);
   };
 
   const getModelLabel = (model: AIModel) => {
@@ -2374,6 +2755,29 @@ export default function HomeView() {
   };
 
   const getCurrentModelLabel = () => {
+    const selectedLabels: Record<string, string> = {
+      auto: 'Auto',
+      'gpt-4': 'GPT-4 Turbo',
+      'gpt-3.5': 'GPT-3.5 Turbo',
+      'claude-opus': 'Claude 3 Opus',
+      'claude-sonnet': 'Claude 3 Sonnet',
+      'claude-haiku': 'Claude 3 Haiku',
+      'gemini-pro': 'Gemini 1.5 Pro',
+      'gemini-flash': 'Gemini 1.5 Flash',
+      'grok-1': 'Grok-1',
+      'gemini-2.5-flash-image': 'Gemini 2.5 Flash Image',
+      'imagen-4.0-generate-001': 'Imagen 4.0 Generate',
+      'grok-imagine-image': 'Grok Imagine Image',
+      'grok-imagine-image-pro': 'Grok Imagine Image Pro',
+      'veo-3.1-generate-preview': 'Veo 3.1',
+      'veo-2.0-generate-001': 'Veo 2.0',
+      'grok-imagine-video': 'Grok Imagine Video',
+    };
+
+    if (selectedModel !== 'auto') {
+      return selectedLabels[selectedModel] || selectedModel;
+    }
+
     if (settings.aiModel === AIModel.AUTO) {
       return getModelLabel(lastAutoModel || latestResponseModel || AIModel.AUTO);
     }
@@ -2468,7 +2872,8 @@ export default function HomeView() {
           profile: userProfile || undefined,
           recentQueries: history.slice(0, 8).map((item) => item.query),
         },
-        continuation
+        continuation,
+        selectedModel
       );
 
       const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
@@ -3219,11 +3624,35 @@ export default function HomeView() {
                                 </p>
                               </button>
                             )}
+                            {msg.dashboard?.url && (
+                              <button
+                                type="button"
+                                onClick={() => openDashboardDialog(msg)}
+                                className="mb-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2 text-left"
+                              >
+                                <div className="relative w-full h-52 rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--background)]">
+                                  <iframe
+                                    src={msg.dashboard.url}
+                                    title={msg.dashboard.title || 'Dashboard preview'}
+                                    className="w-full h-full border-0 pointer-events-none"
+                                    loading="lazy"
+                                    sandbox="allow-scripts allow-same-origin"
+                                  />
+                                  <div className="absolute inset-0 bg-black/15" />
+                                  <div className="absolute bottom-2 left-2 rounded-md bg-black/70 px-2 py-1 text-[10px] uppercase tracking-widest text-white">
+                                    Click to open dashboard
+                                  </div>
+                                </div>
+                                <p className="mt-2 text-[10px] uppercase tracking-widest text-[var(--muted)]">
+                                  {msg.dashboard.summary || 'Interactive responsive dashboard preview'}
+                                </p>
+                              </button>
+                            )}
                             {sanitizeNarrationForDisplay(displayContent).trim() && (
                               <RichMarkdown
                                 content={sanitizeNarrationForDisplay(displayContent)}
-                                enableTabs={settings.narrationType !== 'Educational'}
-                                enableSlider={settings.narrationType !== 'Educational'}
+                                enableTabs
+                                enableSlider
                               />
                             )}
                           </div>
@@ -3250,12 +3679,6 @@ export default function HomeView() {
                           <span>Self \\ Fles</span>
                           <span>•</span>
                           <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                          {msg.modelUsed && (
-                            <>
-                              <span>•</span>
-                              <span>{getModelLabel(msg.modelUsed)}</span>
-                            </>
-                          )}
                         </div>
                         {msg.referencesHtml && (
                           <div className="mt-3 px-2">
@@ -3264,6 +3687,21 @@ export default function HomeView() {
                               className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]"
                               dangerouslySetInnerHTML={{ __html: msg.referencesHtml }}
                             />
+                          </div>
+                        )}
+                        {(msg.tokenUsage || msg.modelUsed) && (
+                          <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-3 uppercase tracking-tighter mt-2">
+                            {msg.tokenUsage && (
+                              <span title={`Prompt: ${msg.tokenUsage.promptTokens} | Completion: ${msg.tokenUsage.completionTokens} | Cost: ~$${msg.tokenUsage.estimatedCost?.toFixed(4) ?? '?'}`}>
+                                {msg.tokenUsage.totalTokens.toLocaleString()} tokens
+                              </span>
+                            )}
+                            {msg.modelUsed && (
+                              <>
+                                <span>•</span>
+                                <span>Powered by {getModelLabel(msg.modelUsed)}</span>
+                              </>
+                            )}
                           </div>
                         )}
                       </>
@@ -3281,7 +3719,7 @@ export default function HomeView() {
               })}
               {isLoading && (
                 <div className="flex justify-start">
-                  {selectedTool === 'image' || selectedTool === 'video' ? (
+                  {selectedTool === 'image' || selectedTool === 'video' || selectedTool === 'dashboard' ? (
                     <div className="media-loader-square">
                       <div className="media-loader-grid" />
                       <div className="media-loader-scan" />
@@ -3317,7 +3755,31 @@ export default function HomeView() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 px-4 md:px-0">
+          <div className="flex-1 px-4 md:px-0 relative">
+            {/* TTS Provider Toggle - top of listen mode */}
+            <div className="absolute top-4 left-0 right-0 flex justify-center z-10">
+              <div className="flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] rounded-full px-1 py-1">
+                {([
+                  { key: TextToSpeechProvider.GEMINI, label: 'Auto' },
+                  { key: TextToSpeechProvider.GOOGLE, label: 'Google' },
+                  { key: TextToSpeechProvider.ELEVENLABS, label: 'ElevenLabs' },
+                ] as const).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSettings(prev => ({ ...prev, ttsProvider: key }))}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                      settings.ttsProvider === key
+                        ? 'bg-[var(--foreground)] text-[var(--background)]'
+                        : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="listen-stage max-w-5xl mx-auto h-full flex items-center justify-center">
               <div className="listen-orbital" style={{ ['--pulse' as string]: pulse.toString() }}>
                 <div className="listen-orb" />
@@ -3332,13 +3794,10 @@ export default function HomeView() {
                   <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
                     {listenStatus === "thinking" ? 'Thinking' : listenStatus === "narrating" ? 'Narrating' : listenStatus === "completed" ? 'Completed' : isMicMuted ? 'Muted' : 'Listening'}
                   </p>
-                  {/* Book/Case Study mode label commented out for now. */}
-                  <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">
-                    AI Model: {getCurrentModelLabel()}
-                  </p>
                 </div>
               </div>
-              <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+              {/* Bottom controls */}
+              <div className="absolute bottom-6 left-0 right-0 flex justify-center z-10">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -3472,7 +3931,7 @@ export default function HomeView() {
                     
                     <button
                       type="button"
-                      onClick={startNewChatSession}
+                      onClick={() => startNewChatSession()}
                       className="w-full py-2 px-3 md:py-2.5 md:px-4 rounded-lg bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm md:text-base hover:opacity-90 transition-all"
                     >
                       ✨ Start New Chat
@@ -3498,6 +3957,7 @@ export default function HomeView() {
                       selectedTool={selectedTool}
                       selectedModel={selectedModel}
                       currentMode={selectedTool || 'text'}
+                      preferredTextProvider={settings.aiModel}
                       isNewChat={messages.length === 0}
                       isListening={isListening}
                       onSearch={(query: string, attachments: AttachedFile[] = []) => {
@@ -3527,24 +3987,18 @@ export default function HomeView() {
               <p className="text-[10px] text-center text-[var(--muted)] mt-3 uppercase tracking-widest">
                 Processing in {settings.language} Language
               </p>
-              <p className="text-[10px] text-center text-[var(--muted)] mt-1 uppercase tracking-widest">
-                AI Model: {getCurrentModelLabel()}
-              </p>
             </div>
           </div>
         )}
       </main>
 
       {selectedHistory && selectedHistory.interactionMode === "listen" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm">
           <div className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
             <div className="p-4 sm:p-6 border-b border-[var(--border)] flex justify-between items-center flex-wrap gap-3">
               <div>
                 <h2 className="text-lg sm:text-xl font-bold">Listen Session</h2>
                 <p className="text-xs text-[var(--muted)] uppercase tracking-widest mt-1 line-clamp-1">{selectedHistory.query}</p>
-                <p className="text-[10px] text-[var(--muted)] uppercase tracking-widest mt-2">
-                  AI Model: {selectedHistory.modelUsed ? getModelLabel(selectedHistory.modelUsed) : getCurrentModelLabel()}
-                </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
@@ -3634,7 +4088,23 @@ export default function HomeView() {
           onDownload={() => {
             void handleMediaDownload();
           }}
+          onCancel={handleMediaRegenCancel}
           isBusy={isMediaRegenerating}
+        />
+      )}
+
+      {dashboardDialog && (
+        <DashboardDialog
+          open={dashboardDialog.open}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDashboardDialog(null);
+              return;
+            }
+            setDashboardDialog((prev) => (prev ? { ...prev, open } : prev));
+          }}
+          dashboardUrl={dashboardDialog.url}
+          title={dashboardDialog.title}
         />
       )}
 

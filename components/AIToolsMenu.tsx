@@ -26,13 +26,13 @@ const TOOL_OPTIONS: ToolOption[] = [
     description: 'Generate images from text descriptions',
     fileAccept: 'image/*',
   },
-  {
-    type: 'video',
-    label: 'Video Creation',
-    icon: '🎬',
-    description: 'Create videos from text or images',
-    fileAccept: 'image/*,video/*',
-  },
+  // {
+  //   type: 'video',
+  //   label: 'Video Creation',
+  //   icon: '🎬',
+  //   description: 'Create videos from text or images',
+  //   fileAccept: 'image/*,video/*',
+  // },
   {
     type: 'ocr',
     label: 'OCR',
@@ -44,7 +44,7 @@ const TOOL_OPTIONS: ToolOption[] = [
     type: 'document',
     label: 'Document Generation',
     icon: '📝',
-    description: 'Generate PDF, DOCX, or Markdown documents',
+    description: 'Generate PDF, DOCX or XLSX',
   },
   {
     type: 'dashboard',

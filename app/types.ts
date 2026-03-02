@@ -38,6 +38,7 @@ export enum VoiceGender {
 }
 
 export enum TextToSpeechProvider {
+  GEMINI = "gemini",
   GOOGLE = "google",
   OPENAI = "openai",
   ELEVENLABS = "elevenlabs",
@@ -80,6 +81,13 @@ export interface Settings {
   enableWebSearch: boolean; // Always enabled for real-time data
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCost?: number; // USD estimate
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -88,11 +96,17 @@ export interface ChatMessage {
   mode?: SearchMode;
   audioBlob?: string;
   modelUsed?: AIModel;
+  tokenUsage?: TokenUsage;
   media?: {
     type: "image" | "video";
     url: string;
     prompt: string;
     modelUsed?: string;
+  };
+  dashboard?: {
+    url: string;
+    title?: string;
+    summary?: string;
   };
   attachments?: Array<{
     name: string;
@@ -131,6 +145,11 @@ export interface HistoryConversationEntry {
     url: string;
     prompt: string;
     modelUsed?: string;
+  };
+  dashboard?: {
+    url: string;
+    title?: string;
+    summary?: string;
   };
   modelUsed?: AIModel;
   referencesHtml?: string;

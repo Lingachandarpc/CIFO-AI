@@ -30,8 +30,9 @@ export async function generateNarrative(
   continuation?: {
     previousNarration?: string;
     userInterruption?: string;
-  }
-): Promise<{ narration: string; modelUsed?: string; referencesHtml?: string }> {
+  },
+  selectedModel?: string
+): Promise<{ narration: string; modelUsed?: string; referencesHtml?: string; tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost?: number } }> {
   try {
     const category = mode === SearchMode.BOOK ? 'Book' : mode === SearchMode.CASE_STUDY ? 'Case Study' : 'Ask';
     const res = await fetch(`${API_BASE}/ai`, {
@@ -49,6 +50,7 @@ export async function generateNarrative(
         chatHistory,
         userContext,
         continuation,
+        selectedModel,
       }),
     });
 
@@ -63,6 +65,7 @@ export async function generateNarrative(
       narration: data.narration || '', 
       modelUsed: data.modelUsed,
       referencesHtml: data.referencesHtml,
+      tokenUsage: data.tokenUsage,
     };
   } catch (error) {
     console.error('Error generating narrative (proxy):', error);
@@ -310,6 +313,96 @@ export async function pollToolVideoStatus(
   }
 }
 
+export async function generateToolDocument(
+  prompt: string,
+  model: string = 'auto',
+  attachments?: Array<{ id: string; name: string; size: number; type: string; base64?: string; tool: string }>,
+  options?: {
+    format?: 'pdf' | 'docx' | 'xlsx' | 'markdown';
+    title?: string;
+    style?: 'minimal' | 'professional' | 'creative';
+    targetFileSizeKB?: number;
+    fileName?: string;
+  }
+): Promise<{ fileBase64?: string; format?: string; mimeType?: string; fileName?: string; summary?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/ai-tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'document',
+        prompt,
+        attachments: (attachments || []).map((attachment) => ({
+          type: attachment.type,
+          data: attachment.base64 || '',
+          name: attachment.name,
+        })),
+        options: {
+          model,
+          format: options?.format || 'pdf',
+          title: options?.title,
+          style: options?.style || 'professional',
+          targetFileSizeKB: options?.targetFileSizeKB,
+          fileName: options?.fileName,
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return { error: data?.error || 'Document generation failed' };
+    }
+
+    return {
+      fileBase64: data?.data?.buffer as string | undefined,
+      format: data?.data?.format as string | undefined,
+      mimeType: data?.data?.mimeType as string | undefined,
+      fileName: data?.data?.fileName as string | undefined,
+      summary: data?.data?.summary as string | undefined,
+    };
+  } catch (error) {
+    console.error('Error generating tool document:', error);
+    return { error: 'Document generation service is unavailable right now.' };
+  }
+}
+
+export async function generateToolDashboard(
+  prompt: string,
+  attachments?: Array<{ id: string; name: string; size: number; type: string; base64?: string; tool: string }>,
+  options?: { title?: string }
+): Promise<{ htmlBase64?: string; title?: string; summary?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/ai-tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'dashboard',
+        prompt,
+        attachments: (attachments || []).map((attachment) => ({
+          type: attachment.type,
+          data: attachment.base64 || '',
+          name: attachment.name,
+        })),
+        options,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return { error: data?.error || 'Dashboard generation failed' };
+    }
+
+    return {
+      htmlBase64: data?.data?.htmlBase64 as string | undefined,
+      title: data?.data?.title as string | undefined,
+      summary: data?.data?.summary as string | undefined,
+    };
+  } catch (error) {
+    console.error('Error generating dashboard:', error);
+    return { error: 'Dashboard generation service is unavailable right now.' };
+  }
+}
+
 export function decodeAudio(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
@@ -323,7 +416,8 @@ export async function getAudioBuffer(
   data: Uint8Array,
   audioContext: AudioContext
 ): Promise<AudioBuffer> {
-  const arrayBuffer = data.buffer as ArrayBuffer;
+  // Create a fresh copy to avoid detached-buffer issues with typed array views
+  const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
   return audioContext.decodeAudioData(arrayBuffer);
 }
 

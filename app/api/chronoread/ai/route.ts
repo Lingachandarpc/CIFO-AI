@@ -19,8 +19,44 @@ import {
   recordUserInteraction,
   analyzeAndUpdateInterests,
 } from "../../../services/userService";
+import { classifyQuery } from "../../../services/queryClassifier";
+import {
+  routeQuery,
+  formatRoutingLog,
+  resolveRoutingToLegacy,
+} from "../../../services/modelRouter";
+import { buildOptimizedPrompt } from "../../../services/promptTemplateEngine";
 
 // All Tavily and context logic moved to middlewareService.ts
+
+/**
+ * Estimate token count from text (approx 1 token per 4 chars / 0.75 words)
+ */
+function estimateTokens(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Estimate cost in USD based on model and token counts
+ */
+function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
+  // Cost per 1M tokens (input/output) - rough estimates
+  const pricing: Record<string, { input: number; output: number }> = {
+    'gpt-4-turbo': { input: 10, output: 30 },
+    'gpt-4o-mini': { input: 0.15, output: 0.6 },
+    'gpt-3.5-turbo': { input: 0.5, output: 1.5 },
+    'claude-3-opus': { input: 15, output: 75 },
+    'claude-3-sonnet': { input: 3, output: 15 },
+    'claude-3-haiku': { input: 0.25, output: 1.25 },
+    'gemini-1.5-pro': { input: 1.25, output: 5 },
+    'gemini-1.5-flash': { input: 0.075, output: 0.3 },
+    'gemini-2.5-flash': { input: 0.15, output: 0.6 },
+    'grok-3': { input: 3, output: 15 },
+  };
+  const rate = pricing[model] || pricing['gemini-1.5-flash'];
+  return (promptTokens * rate.input + completionTokens * rate.output) / 1_000_000;
+}
 
 /**
  * Extract user profile information from chat history
@@ -236,6 +272,151 @@ function isSimpleFactualQuestion(query: string): boolean {
   return false;
 }
 
+function isDayOfWeekQuery(query: string): boolean {
+  const lower = query.toLowerCase().trim();
+  if (!lower) return false;
+
+  // Exclude explanatory/definition style queries
+  if (/(why|explain|meaning|define|definition|history|origin|how|difference)/i.test(lower)) {
+    return false;
+  }
+
+  const englishPatterns = [
+    /what\s+day\s+is\s+today/i,
+    /which\s+day\s+is\s+today/i,
+    /today\s+is\s+what\s+day/i,
+    /day\s+today/i,
+    /today\s+day/i,
+  ];
+  if (englishPatterns.some((pattern) => pattern.test(lower))) return true;
+
+  const multilingualPatterns = [
+    /(qué|que)\s+d[ií]a\s+es\s+hoy|hoy\s+.*(qué|que)\s+d[ií]a/i, // Spanish
+    /(quel|quelle)\s+jour\s+.*aujourd['’]hui|aujourd['’]hui\s+.*(quel|quelle)\s+jour/i, // French
+    /(welcher|welchen)\s+tag\s+.*heute|heute\s+.*(welcher|welchen)\s+tag/i, // German
+    /(que|qual)\s+dia\s+[ée]\s+hoje|hoje\s+.*(que|qual)\s+dia/i, // Portuguese
+    /今天.*(星期几|星期幾|周几|周幾|礼拜几|禮拜幾)|今天是?什么?日子/i, // Chinese
+    /(今日|きょう).*(何曜日|なんようび)/i, // Japanese
+    /(आज|aaj).*(कौन सा दिन|दिन|वार)/i, // Hindi
+    /(இன்று|இன்னைக்கு).*(என்ன\s*கிழமை|என்ன\s*நாள்|கிழமை)/i, // Tamil
+    /(ఈరోజు|ఇవాళ).*(ఏ\s*రోజు|ఏ\s*వారం|వారము)/i, // Telugu
+    /(ഇന്ന്).*(എന്ത്\s*ദിവസം|എന്ത്\s*ദിനം|ആഴ്ച)/i, // Malayalam
+    /(ಇಂದು).*(ಯಾವ\s*ದಿನ|ಯಾವ\s*ವಾರ)/i, // Kannada
+    /(আজ).*(কোন\s*দিন|বার)/i, // Bengali
+    /(आज).*(कोणता\s*दिवस|वार)/i, // Marathi
+    /(આજે).*(કયો\s*દિવસ|વાર)/i, // Gujarati
+    /(ਅੱਜ|ajj).*(ਕਿਹੜਾ\s*ਦਿਨ|ਵਾਰ)/i, // Punjabi
+  ];
+
+  return multilingualPatterns.some((pattern) => pattern.test(query));
+}
+
+function getLocaleFromLanguage(language: string): string {
+  const map: Record<string, string> = {
+    English: 'en-US',
+    Spanish: 'es-ES',
+    French: 'fr-FR',
+    German: 'de-DE',
+    Chinese: 'zh-CN',
+    Japanese: 'ja-JP',
+    Hindi: 'hi-IN',
+    Portuguese: 'pt-PT',
+    Tamil: 'ta-IN',
+    Telugu: 'te-IN',
+    Malayalam: 'ml-IN',
+    Kannada: 'kn-IN',
+    Bengali: 'bn-IN',
+    Marathi: 'mr-IN',
+    Gujarati: 'gu-IN',
+    Punjabi: 'pa-IN',
+  };
+  return map[language] || 'en-US';
+}
+
+function formatDayOfWeekResponse(language: string, date: Date): string {
+  const locale = getLocaleFromLanguage(language);
+  const dayName = new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(date);
+
+  const templates: Record<string, string> = {
+    English: `Today is ${dayName}.`,
+    Spanish: `Hoy es ${dayName}.`,
+    French: `Aujourd’hui, c’est ${dayName}.`,
+    German: `Heute ist ${dayName}.`,
+    Chinese: `今天是${dayName}。`,
+    Japanese: `今日は${dayName}です。`,
+    Hindi: `आज ${dayName} है।`,
+    Portuguese: `Hoje é ${dayName}.`,
+    Tamil: `இன்று ${dayName}.`,
+    Telugu: `ఈరోజు ${dayName}.`,
+    Malayalam: `ഇന്ന് ${dayName} ആണ്.`,
+    Kannada: `ಇಂದು ${dayName}.`,
+    Bengali: `আজ ${dayName}।`,
+    Marathi: `आज ${dayName} आहे.`,
+    Gujarati: `આજે ${dayName} છે.`,
+    Punjabi: `ਅੱਜ ${dayName} ਹੈ।`,
+  };
+
+  return templates[language] || `Today is ${dayName}.`;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasGreetingPrefix(text: string): boolean {
+  return /^(hi|hello|hey)\b/i.test(text.trim());
+}
+
+function applyGreetingPolicy(
+  narration: string,
+  profileName: string | undefined,
+  chatHistory: Array<{ role: string; content: string }>
+): string {
+  if (!narration) return narration;
+
+  let normalized = narration.trimStart();
+  const greetedEarlier = chatHistory.some(
+    (msg) => msg.role === 'assistant' && hasGreetingPrefix(msg.content || '')
+  );
+
+  if (hasGreetingPrefix(normalized)) {
+    if (greetedEarlier) {
+      normalized = normalized
+        .replace(/^(hi|hello|hey)\s+[^,\n.!?]+[,:!\-\s]*/i, '')
+        .trimStart();
+    } else {
+      const preferredName = (profileName || '').trim();
+      if (preferredName) {
+        normalized = normalized.replace(
+          /^(hi|hello|hey)\s+[^,\n.!?]+(?:\s*,\s*in\s+[^,\n.!?]+)?[,:!\-\s]*/i,
+          `Hi ${preferredName}, `
+        );
+      } else {
+        normalized = normalized.replace(
+          /^(hi|hello|hey)\s+[^,\n.!?]+(?:\s*,\s*in\s+[^,\n.!?]+)?[,:!\-\s]*/i,
+          'Hi, '
+        );
+      }
+    }
+  }
+
+  if (profileName?.trim()) {
+    const safeName = escapeRegex(profileName.trim());
+    normalized = normalized.replace(
+      new RegExp(`^for\\s+${safeName}\\s*,\\s*in\\s+[^,\\n.!?]+[,:!\\-\\s]*`, 'i'),
+      ''
+    );
+  }
+
+  // Never keep ", in <city>" as part of opening greeting
+  normalized = normalized.replace(
+    /^(Hi\s+[^,\n.!?]+),\s*in\s+[^,\n.!?]+([,:!\-\s]*)/i,
+    '$1$2'
+  );
+
+  return normalized.trimStart();
+}
+
 export async function POST(req: Request) {
   try {
     const {
@@ -245,16 +426,71 @@ export async function POST(req: Request) {
       language,
       interactionMode = "read",
       aiModel = "auto",
+      selectedModel,
       enableWebSearch = true,
       userContext,
       chatHistory = [],
     } = await req.json();
+
+    // ========================================================================
+    // Freemium Token Budget Check
+    // ========================================================================
+    try {
+      const budgetSession = await getServerSession(authOptions);
+      if (budgetSession?.user?.email) {
+        const budgetUser = await prisma.user.findUnique({
+          where: { email: budgetSession.user.email },
+          select: { tokenBudget: true, tokensUsed: true, tier: true, periodStart: true },
+        });
+        if (budgetUser) {
+          // Auto-reset monthly period
+          const now = new Date();
+          const periodStart = new Date(budgetUser.periodStart);
+          const monthsDiff = (now.getFullYear() - periodStart.getFullYear()) * 12 + (now.getMonth() - periodStart.getMonth());
+          if (monthsDiff >= 1) {
+            await prisma.user.update({
+              where: { email: budgetSession.user.email },
+              data: { tokensUsed: 0, periodStart: now },
+            });
+            budgetUser.tokensUsed = 0;
+          }
+          // Block if over budget
+          if (budgetUser.tokensUsed >= budgetUser.tokenBudget) {
+            return NextResponse.json({
+              error: "Monthly token limit reached. Upgrade to continue.",
+              tokenBudgetExceeded: true,
+              tier: budgetUser.tier,
+              tokensUsed: budgetUser.tokensUsed,
+              tokenBudget: budgetUser.tokenBudget,
+            }, { status: 429 });
+          }
+        }
+      }
+    } catch {
+      // Don't block on budget check failures
+    }
 
     const parsedNarrationTime =
       typeof narrationTime === "number" ? narrationTime : Number(narrationTime);
     const resolvedNarrationTime = Number.isFinite(parsedNarrationTime)
       ? parsedNarrationTime
       : 1.5;
+
+    // Fast path: day-of-week queries should always be concise in every language
+    if (isDayOfWeekQuery(query)) {
+      const dayLine = formatDayOfWeekResponse(language || 'English', new Date());
+      return NextResponse.json({
+        narration: dayLine,
+        referencesHtml: undefined,
+        modelUsed: 'gemini',
+        tokenUsage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          estimatedCost: 0,
+        },
+      });
+    }
 
     // ========================================================================
     // Realistic Mode Optimization: Skip web search for simple factual questions
@@ -272,9 +508,83 @@ export async function POST(req: Request) {
     // ========================================================================
     // Build User Mind Context (middleware-ready)
     // ========================================================================
+
+    // Server-side: Load authoritative profile + recent chat history from DB
+    // This supplements (and may override) whatever the client sent
+    let dbProfile: Record<string, unknown> | null = null;
+    let dbChatHistory: Array<{ role: string; content: string }> = [];
+    let dbInsight: Record<string, unknown> | null = null;
+    try {
+      const profileSession = await getServerSession(authOptions);
+      if (profileSession?.user?.email) {
+        const dbUser = await prisma.user.findUnique({
+          where: { email: profileSession.user.email },
+          select: { id: true },
+        });
+        if (dbUser) {
+          // Load persisted profile
+          const profile = await prisma.userProfile.findUnique({
+            where: { userId: dbUser.id },
+          });
+          if (profile) {
+            dbProfile = {
+              location: profile.location,
+              interests: profile.interests,
+              pulse: profile.pulse,
+              bio: profile.bio,
+              age: profile.age,
+              questionTypes: profile.questionTypes,
+              preferredLength: profile.preferredLength,
+            };
+          }
+          // Load recent chat history from DB (last 10 messages) to enrich context
+          const recentChats = await prisma.chatHistory.findMany({
+            where: { userId: dbUser.id },
+            orderBy: { timestamp: 'desc' },
+            take: 10,
+            select: { role: true, content: true },
+          });
+          if (recentChats.length > 0) {
+            dbChatHistory = recentChats.reverse().map((c) => ({ role: c.role, content: c.content }));
+          }
+          // Load user insights for additional personalization
+          const insight = await prisma.userInsight.findUnique({
+            where: { userId: dbUser.id },
+          });
+          if (insight) {
+            dbInsight = {
+              topTopics: insight.topTopics,
+              preferredMode: insight.preferredMode,
+              preferredVoice: insight.preferredVoice,
+              likeCount: insight.likeCount,
+              dislikeCount: insight.dislikeCount,
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error loading server-side user context:', err);
+    }
+
+    // Merge: prefer DB profile over client-sent profile, use DB chat history as fallback
+    const mergedProfile = {
+      ...(dbProfile || {}),
+      ...(userContext?.profile || {}),
+      // DB values win for fields the client might not have
+      ...(dbProfile?.interests ? { interests: dbProfile.interests } : {}),
+      ...(dbProfile?.location ? { location: dbProfile.location } : {}),
+      ...(dbProfile?.bio ? { bio: dbProfile.bio } : {}),
+      ...(dbProfile?.age ? { age: dbProfile.age } : {}),
+      // Add insight-based personalization
+      ...(dbInsight?.topTopics ? { topTopics: dbInsight.topTopics } : {}),
+      ...(dbInsight?.preferredMode ? { preferredMode: dbInsight.preferredMode } : {}),
+    };
     
+    // Use DB chat history if client didn't send enough context
+    const mergedChatHistory = chatHistory.length >= 3 ? chatHistory : (dbChatHistory.length > 0 ? dbChatHistory : chatHistory);
+
     // Extract location and other profile info from chat history if not in profile
-    const extractedProfile = extractProfileFromHistory(chatHistory, userContext?.profile);
+    const extractedProfile = extractProfileFromHistory(mergedChatHistory, mergedProfile);
     
     // Debug logging for time queries
     if (needsRealTimeData) {
@@ -355,85 +665,191 @@ export async function POST(req: Request) {
     };
 
     // ========================================================================
-    // Select AI Adapter based on model choice
+    // SMART MODEL ROUTING: Classify → Route → Optimize Prompt
     // ========================================================================
     type AdapterOptions = {
       narrationTime: number;
       narrationType: string;
       language: string;
       interactionMode: 'read' | 'listen';
+      selectedModel?: string;
     };
 
-    let selectedAdapter: (
-      enrichedQuery: string,
-      context: import('../../../services/middlewareService').MiddlewareContext,
-      options: AdapterOptions
-    ) => Promise<string>;
-    let modelName: string;
+    // Step 1: Classify the query (complexity, intent, domain, attachments)
+    const queryClassification = classifyQuery(query, {
+      attachments: userContext?.attachments?.map((a: { name: string; type: string; size?: number }) => ({
+        name: a.name,
+        type: a.type,
+        size: a.size,
+      })),
+      chatHistory: mergedChatHistory,
+    });
 
-    switch (aiModel) {
-      case "gemini":
-        selectedAdapter = geminiAdapter;
-        modelName = "gemini";
-        break;
-      case "claude-sonnet":
-        selectedAdapter = claudeAdapter;
-        modelName = "claude";
-        break;
-      case "xai":
-        selectedAdapter = xaiAdapter;
-        modelName = "xai";
-        break;
-      case "openai":
-        selectedAdapter = openaiAdapter;
-        modelName = "openai";
-        break;
-      case "auto":
-      default:
-        // Auto: prefer XAI for web search, OpenAI otherwise
-        selectedAdapter = finalEnableWebSearch ? xaiAdapter : openaiAdapter;
-        modelName = finalEnableWebSearch ? "xai" : "openai";
-        break;
+    // Step 2: Route to optimal model using intelligent scoring
+    const routingDecision = routeQuery(queryClassification, {
+      aiModel,
+      selectedModel,
+    });
+
+    // Log the routing decision for debugging
+    console.log(formatRoutingLog(routingDecision));
+
+    // Step 3: Build optimized prompt template for the selected model
+    const optimizedPrompt = buildOptimizedPrompt(queryClassification, {
+      userProfile: extractedProfile,
+      mood: userMindContext.mood ? {
+        current: userMindContext.mood.current,
+        energy: userMindContext.mood.energy,
+      } : undefined,
+      chatHistory: mergedChatHistory,
+      language,
+      narrationType,
+      interactionMode,
+      targetProvider: routingDecision.provider,
+    });
+
+    // Resolve to legacy format for backward compatibility
+    const resolvedSelection = resolveRoutingToLegacy(routingDecision);
+
+    // Helper: map provider name to adapter function
+    const getAdapter = (provider: string): typeof geminiAdapter => {
+      switch (provider) {
+        case 'google': return geminiAdapter;
+        case 'anthropic': return claudeAdapter;
+        case 'xai': return xaiAdapter;
+        case 'openai': return openaiAdapter;
+        default: return openaiAdapter;
+      }
+    };
+
+    const adapterOptions: AdapterOptions = {
+      narrationTime: resolvedNarrationTime,
+      narrationType,
+      language,
+      interactionMode,
+      selectedModel: resolvedSelection.model,
+    };
+
+    const middlewareOptions = {
+      narrationTime: resolvedNarrationTime,
+      narrationType,
+      language,
+      interactionMode,
+      enableWebSearch: finalEnableWebSearch,
+      userContext: userMindContext,
+      chatHistory: mergedChatHistory,
+    };
+
+    // ========================================================================
+    // Process through Middleware Layer (with fallback on adapter failure)
+    // ========================================================================
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let enhancedResponse: Awaited<ReturnType<typeof processQueryWithMiddleware>> = undefined as any;
+    let modelName = resolvedSelection.model;
+
+    try {
+      const selectedAdapter = getAdapter(resolvedSelection.provider);
+      enhancedResponse = await processQueryWithMiddleware(
+        query,
+        (enrichedQuery, context) =>
+          selectedAdapter(enrichedQuery, context, adapterOptions),
+        middlewareOptions,
+      );
+    } catch (primaryError) {
+      // Primary adapter failed — try alternatives from the routing decision
+      console.warn(`⚠️ Primary adapter (${resolvedSelection.provider}/${resolvedSelection.model}) failed:`, primaryError);
+
+      let fallbackSucceeded = false;
+      for (const alt of routingDecision.alternatives) {
+        try {
+          const altAdapter = getAdapter(alt.provider);
+          const altSelection = { provider: alt.provider, model: alt.model };
+          console.log(`🔄 Trying fallback: ${alt.displayName} (${altSelection.provider}/${altSelection.model})`);
+
+          enhancedResponse = await processQueryWithMiddleware(
+            query,
+            (enrichedQuery, context) =>
+              altAdapter(enrichedQuery, context, {
+                ...adapterOptions,
+                selectedModel: altSelection.model,
+              }),
+            middlewareOptions,
+          );
+
+          modelName = altSelection.model;
+          fallbackSucceeded = true;
+          console.log(`✅ Fallback succeeded with ${alt.displayName}`);
+          break;
+        } catch (fallbackError) {
+          console.warn(`⚠️ Fallback ${alt.displayName} also failed:`, fallbackError);
+        }
+      }
+
+      if (!fallbackSucceeded) {
+        console.error('❌ All AI adapters failed');
+        return NextResponse.json(
+          { error: "All AI models failed to generate a response" },
+          { status: 503 }
+        );
+      }
     }
 
-    // ========================================================================
-    // Process through Middleware Layer
-    // ========================================================================
-    const enhancedResponse = await processQueryWithMiddleware(
-      query,
-      (enrichedQuery, context) =>
-        selectedAdapter(enrichedQuery, context, {
-          narrationTime: resolvedNarrationTime,
-          narrationType,
-          language,
-          interactionMode,
-        }),
-      {
-        narrationTime: resolvedNarrationTime,
-        narrationType,
-        language,
-        interactionMode,
-        enableWebSearch: finalEnableWebSearch,
-        userContext: userMindContext,
-        chatHistory,
-      }
+    enhancedResponse.narration = applyGreetingPolicy(
+      enhancedResponse.narration,
+      typeof extractedProfile?.name === 'string' ? extractedProfile.name : undefined,
+      mergedChatHistory
     );
 
     // ========================================================================
-    // Record User Interaction & Update Interests
+    // Estimate Token Usage
     // ========================================================================
+    const promptTokens = estimateTokens(optimizedPrompt.systemPrompt + query);
+    const completionTokens = estimateTokens(enhancedResponse.narration);
+    const totalTokens = promptTokens + completionTokens;
+    const estimatedCostUsd = estimateCost(modelName, promptTokens, completionTokens);
+
+    // ========================================================================
+    // Record User Interaction, Token Usage & Update Interests
+    // ========================================================================
+    let tokenBudgetExceeded = false;
     try {
       const session = await getServerSession(authOptions);
       if (session?.user?.email) {
         const user = await prisma.user.findUnique({
           where: { email: session.user.email },
-          select: { id: true },
+          select: { id: true, tokenBudget: true, tokensUsed: true },
         });
         
         if (user) {
           // Record this query in interaction history
           const responseLength = enhancedResponse.narration.split(/\s+/).length;
           await recordUserInteraction(user.id, query, responseLength);
+
+          // Record token usage and update running total
+          try {
+            await prisma.$transaction([
+              prisma.tokenUsageLog.create({
+                data: {
+                  userId: user.id,
+                  model: modelName,
+                  promptTokens,
+                  completionTokens,
+                  totalTokens,
+                  estimatedCost: estimatedCostUsd,
+                  queryType: "text",
+                },
+              }),
+              prisma.user.update({
+                where: { id: user.id },
+                data: { tokensUsed: { increment: totalTokens } },
+              }),
+            ]);
+          } catch (tokenErr) {
+            console.error('Token recording failed:', tokenErr);
+          }
+
+          // Check if budget exceeded
+          tokenBudgetExceeded = (user.tokensUsed + totalTokens) > user.tokenBudget;
           
           // Analyze and update interests every 5th query
           const interactionCount = await prisma.userInteractionHistory.count({
@@ -445,7 +861,6 @@ export async function POST(req: Request) {
           });
           
           if (interactionCount % 5 === 0) {
-            // Run interest analysis in background (don't await)
             analyzeAndUpdateInterests(user.id).catch(err => 
               console.error('Background interest analysis failed:', err)
             );
@@ -453,7 +868,6 @@ export async function POST(req: Request) {
         }
       }
     } catch (trackingError) {
-      // Don't fail the request if tracking fails
       console.error('Error tracking user interaction:', trackingError);
     }
 
@@ -466,7 +880,27 @@ export async function POST(req: Request) {
       modelUsed: modelName,
       webSources: enhancedResponse.webSources,
       contextApplied: enhancedResponse.contextApplied,
-      metadata: enhancedResponse.metadata,
+      tokenUsage: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCost: estimatedCostUsd,
+      },
+      tokenBudgetExceeded,
+      metadata: {
+        ...enhancedResponse.metadata,
+        // Smart routing metadata
+        routing: {
+          complexity: queryClassification.complexity,
+          intent: queryClassification.primaryIntent,
+          domain: queryClassification.domain,
+          selectedModel: routingDecision.selected.displayName,
+          routingScore: routingDecision.selected.score,
+          routingConfidence: routingDecision.confidence,
+          promptComplexity: optimizedPrompt.metadata.complexity,
+          suggestedTemperature: optimizedPrompt.suggestedTemperature,
+        },
+      },
     });
   } catch (err) {
     console.error("❌ AI API error:", err);

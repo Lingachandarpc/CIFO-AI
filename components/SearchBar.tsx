@@ -24,6 +24,8 @@ interface AIModel {
   id: string;
   label: string;
   provider: string;
+  modes: Array<"text" | AIToolType>;
+  description?: string;
 }
 
 const TOOL_OPTIONS: ToolOption[] = [
@@ -51,28 +53,34 @@ const TOOL_OPTIONS: ToolOption[] = [
     icon: "📝",
     description: "Generate PDF, DOCX, Markdown",
   },
+  {
+    type: "dashboard",
+    label: "Dashboard",
+    icon: "📊",
+    description: "View analytics and statistics",
+  },
 ];
 
 const AI_MODELS: AIModel[] = [
-  { id: "auto", label: "Auto - Best Available", provider: "Auto" },
+  { id: "auto", label: "Auto - Best Available", provider: "Auto", modes: ["text", "image", "video", "ocr", "document"], description: "Smart routing picks the best model for your query" },
   // IMAGE MODELS
-  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "Google" },
-  { id: "imagen-4.0-generate-001", label: "Imagen 4.0 Generate", provider: "Google" },
-  { id: "grok-imagine-image", label: "Grok Imagine Image", provider: "xAI" },
-  { id: "grok-imagine-image-pro", label: "Grok Imagine Image Pro", provider: "xAI" },
+  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "Google", modes: ["image"], description: "Fast, high-quality image generation" },
+  { id: "imagen-4.0-generate-001", label: "Imagen 4.0 Generate", provider: "Google", modes: ["image"], description: "Google's premium image model — photorealistic" },
+  { id: "grok-imagine-image", label: "Grok Imagine Image", provider: "xAI", modes: ["image"], description: "Creative & unrestricted image generation" },
+  { id: "grok-imagine-image-pro", label: "Grok Imagine Image Pro", provider: "xAI", modes: ["image"], description: "Higher quality, detailed image results" },
   // VIDEO MODELS
-  { id: "veo-3.1-generate-preview", label: "Veo 3.1 (Gemini)", provider: "Google" },
-  { id: "veo-2.0-generate-001", label: "Veo 2.0 (Gemini)", provider: "Google" },
-  { id: "grok-imagine-video", label: "Grok Imagine Video (xAI)", provider: "xAI" },
+  { id: "veo-3.1-generate-preview", label: "Veo 3.1 (Gemini)", provider: "Google", modes: ["video"], description: "Latest video generation with audio" },
+  { id: "veo-2.0-generate-001", label: "Veo 2.0 (Gemini)", provider: "Google", modes: ["video"], description: "Stable video generation — good for simple clips" },
+  { id: "grok-imagine-video", label: "Grok Imagine Video (xAI)", provider: "xAI", modes: ["video"], description: "Creative short video generation" },
   // CHAT MODELS
-  { id: "gpt-4", label: "GPT-4 Turbo", provider: "OpenAI" },
-  { id: "gpt-3.5", label: "GPT-3.5 Turbo", provider: "OpenAI" },
-  { id: "claude-opus", label: "Claude 3 Opus", provider: "Anthropic" },
-  { id: "claude-sonnet", label: "Claude 3 Sonnet", provider: "Anthropic" },
-  { id: "claude-haiku", label: "Claude 3 Haiku", provider: "Anthropic" },
-  { id: "gemini-pro", label: "Gemini 1.5 Pro", provider: "Google" },
-  { id: "gemini-flash", label: "Gemini 1.5 Flash", provider: "Google" },
-  { id: "grok-1", label: "Grok-1", provider: "xAI" },
+  { id: "gpt-4", label: "GPT-4 Turbo", provider: "OpenAI", modes: ["text", "ocr", "document"], description: "Best for complex reasoning & analysis" },
+  { id: "gpt-3.5", label: "GPT-3.5 Turbo", provider: "OpenAI", modes: ["text", "document"], description: "Fast & cost-effective for simple queries" },
+  { id: "claude-opus", label: "Claude 3 Opus", provider: "Anthropic", modes: ["text", "ocr", "document"], description: "Most capable — deep research & writing" },
+  { id: "claude-sonnet", label: "Claude 3 Sonnet", provider: "Anthropic", modes: ["text", "ocr", "document"], description: "Balanced — great for most tasks" },
+  { id: "claude-haiku", label: "Claude 3 Haiku", provider: "Anthropic", modes: ["text", "document"], description: "Fastest Claude — quick answers & summaries" },
+  { id: "gemini-pro", label: "Gemini 1.5 Pro", provider: "Google", modes: ["text", "ocr", "document"], description: "Long context & multimodal — best for large docs" },
+  { id: "gemini-flash", label: "Gemini 1.5 Flash", provider: "Google", modes: ["text", "ocr", "document"], description: "Ultra-fast with good accuracy" },
+  { id: "grok-1", label: "Grok-1", provider: "xAI", modes: ["text", "document"], description: "Real-time knowledge & witty responses" },
 ];
 
 export { type AttachedFile };
@@ -87,6 +95,7 @@ interface SearchBarProps {
   selectedTool?: string | null;
   selectedModel?: string;
   currentMode?: string; // 'text' | 'image' | 'video' | 'ocr' | 'document'
+  preferredTextProvider?: string; // 'auto' | 'openai' | 'claude-sonnet' | 'gemini' | 'xai'
   disabled?: boolean;
   placeholder?: string;
   isNewChat?: boolean;
@@ -103,6 +112,7 @@ export default function SearchBar({
   selectedTool,
   selectedModel = "auto",
   currentMode = "text",
+  preferredTextProvider = "auto",
   disabled = false,
   placeholder = "Ask a story, case, or question...",
   isNewChat = true,
@@ -214,30 +224,43 @@ export default function SearchBar({
     setIsExpanded(!isExpanded);
   };
 
-  const currentModel = AI_MODELS.find((m) => m.id === selectedModel);
+  const currentModel = AI_MODELS.find((m) => m.id === selectedModel) || AI_MODELS[0];
 
   // Get recommended models based on current mode
   const getModeRecommendedModels = () => {
-    // For image mode, show image-specialized models
-    if (currentMode === "image") {
-      return AI_MODELS.filter(m => 
-        ["auto", "gemini-2.5-flash-image", "imagen-4.0-generate-001", "grok-imagine-image", "grok-imagine-image-pro"].includes(m.id)
-      );
+    const activeMode: "text" | AIToolType =
+      currentMode === "image" || currentMode === "video" || currentMode === "ocr" || currentMode === "document"
+        ? currentMode
+        : "text";
+
+    const modeModels = AI_MODELS.filter((model) => model.modes.includes(activeMode));
+
+    if (activeMode !== "text" || preferredTextProvider === "auto") {
+      return modeModels;
     }
-    // For video mode, show video-specialized models
-    if (currentMode === "video") {
-      return AI_MODELS.filter(m => 
-        ["veo-3.1-generate-preview", "veo-2.0-generate-001", "grok-imagine-video"].includes(m.id)
-      );
-    }
-    // For text and other modes, show ALL models including Gemini and xAI
-    return AI_MODELS;
+
+    const isProviderMatch = (modelId: string) => {
+      if (modelId === 'auto') return true;
+      if (preferredTextProvider === 'openai') return modelId.startsWith('gpt-');
+      if (preferredTextProvider === 'claude-sonnet') return modelId.startsWith('claude-');
+      if (preferredTextProvider === 'gemini') return modelId.startsWith('gemini-');
+      if (preferredTextProvider === 'xai') return modelId.startsWith('grok-');
+      return true;
+    };
+
+    return modeModels.filter((model) => isProviderMatch(model.id));
   };
 
   const recommendedModels = getModeRecommendedModels();
 
+  useEffect(() => {
+    if (!recommendedModels.some((model) => model.id === selectedModel)) {
+      onModelChange?.('auto');
+    }
+  }, [recommendedModels, selectedModel, onModelChange]);
+
   return (
-    <div className="relative z-[220] isolate w-full min-w-0 flex flex-col gap-2">
+    <div className="relative w-full min-w-0 flex flex-col gap-2">
       {/* Main Search Bar Container */}
       <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl transition-all hover:border-[var(--muted-strong)] focus-within:border-[var(--foreground)]">
         {/* Top Row: + Button and Controls */}
@@ -407,6 +430,13 @@ export default function SearchBar({
                               {model.provider}
                             </span>
                           </div>
+                          {model.description && (
+                            <p className={`text-[10px] mt-0.5 leading-tight ${
+                              selectedModel === model.id ? "opacity-70" : "text-[var(--muted)] opacity-50"
+                            }`}>
+                              {model.description}
+                            </p>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -513,13 +543,6 @@ export default function SearchBar({
           </div>
         )}
       </div>
-
-      {/* Mode Display */}
-      {selectedTool && (
-        <div className="text-xs text-[var(--muted)] px-2">
-          Mode: <span className="font-semibold text-[var(--foreground)]">{selectedTool}</span>
-        </div>
-      )}
 
       {/* Attached Files Display */}
       {attachedFiles.length > 0 && (

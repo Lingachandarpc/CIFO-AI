@@ -11,7 +11,7 @@ const defaultSettings: Settings = {
   voiceType: DEFAULT_GOOGLE_VOICE,
   voiceGender: VoiceGender.AUTO,
   language: Language.ENGLISH,
-  ttsProvider: TextToSpeechProvider.GOOGLE,
+  ttsProvider: TextToSpeechProvider.GEMINI,
   aiModel: AIModel.AUTO,
   enableBackgroundMusic: false,
   backgroundMusicVolume: 0.15,
@@ -29,7 +29,7 @@ type ProfileForm = {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"narration" | "profile">("narration");
+  const [activeTab, setActiveTab] = useState<"narration" | "profile" | "usage">("narration");
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [profile, setProfile] = useState<ProfileForm>({
     name: "",
@@ -44,6 +44,14 @@ export default function SettingsPage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
+  const [tokenData, setTokenData] = useState<{
+    tier: string;
+    tokenBudget: number;
+    tokensUsed: number;
+    tokensRemaining: number;
+    usagePercentage: number;
+    recentUsage: Array<{ model: string; totalTokens: number; totalCost: number; requestCount: number }>;
+  } | null>(null);
 
   const availableVoices = useMemo(
     () => filterVoicesByGender(googleVoices, settings.voiceGender),
@@ -124,6 +132,15 @@ export default function SettingsPage() {
 
     void loadSettingsAndProfile();
   }, []);
+
+  // Load token usage data when Usage tab is active
+  useEffect(() => {
+    if (activeTab !== "usage") return;
+    fetch("/api/chronoread/tokens", { cache: "no-store", credentials: "include" })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data) setTokenData(data); })
+      .catch(() => {});
+  }, [activeTab]);
 
   const handleProfileChange = (field: keyof ProfileForm, value: string) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
@@ -225,6 +242,17 @@ export default function SettingsPage() {
           >
             Profile
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("usage")}
+            className={`px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-full transition-all ${
+              activeTab === "usage"
+                ? "bg-[var(--foreground)] text-[var(--background)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            Usage
+          </button>
         </div>
 
         {statusMessage && (
@@ -239,28 +267,6 @@ export default function SettingsPage() {
           </div>
         ) : activeTab === "narration" ? (
           <div className="space-y-8 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
-            <div>
-              <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">AI Model</label>
-              <select
-                value={settings.aiModel}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    aiModel: e.target.value as AIModel,
-                  }))
-                }
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--muted-strong)]"
-              >
-                <option value={AIModel.AUTO}>Auto (fastest available)</option>
-                <option value={AIModel.OPENAI}>OpenAI</option>
-                <option value={AIModel.CLAUDE_SONNET}>Claude Sonnet</option>
-                <option value={AIModel.GEMINI}>Gemini</option>
-                <option value={AIModel.XAI}>xAI</option>
-              </select>
-              <p className="mt-2 text-xs text-[var(--muted)]">
-                Auto uses the lowest-latency model based on recent responses.
-              </p>
-            </div>
             {/* Text-to-Speech Provider selection is temporarily hidden while Google TTS is default. */}
 
             <div>
@@ -347,7 +353,7 @@ export default function SettingsPage() {
               {isSavingSettings ? "Saving..." : "Save Response Settings"}
             </button>
           </div>
-        ) : (
+        ) : activeTab === "profile" ? (
           <div className="space-y-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
             {/* Info Box: Auto-save from chat */}
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-3">
@@ -487,7 +493,96 @@ export default function SettingsPage() {
               {isSavingProfile ? "Saving..." : "Save Profile"}
             </button>
           </div>
-        )}
+        ) : activeTab === "usage" ? (
+          <div className="space-y-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--muted-strong)]">Token Usage</h3>
+              <p className="mt-1 text-xs text-[var(--muted)]">Your AI usage for the current billing period.</p>
+            </div>
+
+            {tokenData ? (
+              <>
+                {/* Tier & Budget */}
+                <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4 text-center">
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Tier</p>
+                    <p className="mt-1 text-lg font-bold capitalize text-[var(--foreground)]">{tokenData.tier}</p>
+                  </div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4 text-center">
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Used</p>
+                    <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{tokenData.tokensUsed.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4 text-center">
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Remaining</p>
+                    <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{tokenData.tokensRemaining.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4 text-center">
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Budget</p>
+                    <p className="mt-1 text-lg font-bold text-[var(--foreground)]">{tokenData.tokenBudget.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-[var(--muted)]">{tokenData.usagePercentage}% used</span>
+                    <span className="text-xs text-[var(--muted)]">{tokenData.tokensRemaining.toLocaleString()} remaining</span>
+                  </div>
+                  <div className="h-3 rounded-full bg-[var(--surface-strong)] overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        tokenData.usagePercentage > 90 ? 'bg-red-500' :
+                        tokenData.usagePercentage > 70 ? 'bg-yellow-500' :
+                        'bg-green-500'
+                      }`}
+                      style={{ width: `${Math.min(100, tokenData.usagePercentage)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Recent Usage by Model */}
+                {tokenData.recentUsage.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[var(--muted-strong)] mb-3">Last 7 Days by Model</h4>
+                    <div className="space-y-2">
+                      {tokenData.recentUsage.map((usage) => (
+                        <div key={usage.model} className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-2">
+                          <div>
+                            <p className="text-sm font-medium text-[var(--foreground)]">{usage.model}</p>
+                            <p className="text-[10px] text-[var(--muted)]">{usage.requestCount} requests</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-[var(--foreground)]">{usage.totalTokens.toLocaleString()}</p>
+                            {/* <p className="text-[10px] text-[var(--muted)]">~${usage.totalCost.toFixed(4)}</p> */}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Upgrade CTA for free tier */}
+                {tokenData.tier === "free" && (
+                  <div className="rounded-xl border border-[var(--border)] bg-gradient-to-r from-purple-500/10 to-blue-500/10 px-4 py-4 text-center">
+                    <p className="text-sm font-bold text-[var(--foreground)]">Upgrade to Pro</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">Get 500K tokens/month, priority routing, and faster models.</p>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-full bg-[var(--foreground)] px-6 py-2 text-xs font-bold uppercase tracking-widest text-[var(--background)] hover:opacity-90"
+                      onClick={() => setStatusMessage("Pro plan coming soon!")}
+                    >
+                      Upgrade
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-8 text-[var(--muted)] text-sm">
+                Sign in to view your token usage.
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
