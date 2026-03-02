@@ -22,6 +22,11 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "Self \\ Fles",
   description: "Self companion AI app.",
+  icons: {
+    icon: "/eyes-logo.svg",
+    shortcut: "/eyes-logo.svg",
+    apple: "/eyes-logo.svg",
+  },
 };
 
 export const viewport = {

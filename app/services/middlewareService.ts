@@ -639,12 +639,25 @@ function combineAIandWebResults(
     })
     .join('');
 
+  const sourceLinks = limitedResults
+    .map((r) => {
+      const domain = new URL(r.url).hostname.replace(/^www\./, '');
+      return `<a href="${r.url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--border);border-radius:9999px;text-decoration:none;max-width:100%;overflow-wrap:anywhere;word-break:break-word;"><span style="display:inline-block;max-width:100%;overflow-wrap:anywhere;word-break:break-word;">${domain}</span></a>`;
+    })
+    .join('');
+
   const stackWidth = limitedResults.length * 14 + 20;
 
   const totalButtonWidth = stackWidth;
 
   // Return narration and references separately (do NOT append references to narration)
-  const webContext = `<span data-web-refs style="display:inline-flex;align-items:center;margin-left:4px;"><span style="position:relative;height:20px;width:${totalButtonWidth}px;display:inline-block;">${faviconStack}</span></span>`;
+  const webContext = `
+    <div data-web-refs style="display:flex;flex-direction:column;gap:8px;max-width:100%;">
+      <span style="display:inline-flex;align-items:center;margin-left:4px;min-height:20px;">
+        <span style="position:relative;height:20px;width:${totalButtonWidth}px;display:inline-block;">${faviconStack}</span>
+      </span>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;max-width:100%;">${sourceLinks}</div>
+    </div>`;
 
   return {
     narration: aiResponse + imageSection,

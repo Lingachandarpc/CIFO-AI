@@ -1,6 +1,7 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
@@ -13,15 +14,11 @@ import MediaEditorDialog from '../components/MediaEditorDialog';
 import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
 import { filterVoicesByGender, generateSpeechWithGoogle, getGoogleLanguageCode, listGoogleVoices, resolveGoogleVoice, GoogleVoice } from './services/googleTtsService';
 import { createAmbientMusicForGenre, stopAmbientMusic as stopMusicService } from './services/backgroundMusicService';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import ChartRenderer, { type ChartData } from '../components/ChartRenderer';
 import NanobotCanvas from '../components/NanobotCanvas';
-import NanobotGame, { type GameConfig } from '../components/NanobotGame';
+import ThemeSphere from '../components/ThemeSphere';
+import { type GameConfig } from '../components/NanobotGame';
+import RichMarkdown from '../components/home/RichMarkdown';
 
-type TabsBlock = { label: string; content: string };
-type TableBlock = { title?: string; columns: string[]; rows: string[][] };
 type MediaDialogState = {
   open: boolean;
   type: 'image' | 'video';
@@ -132,372 +129,6 @@ const appendGameSuggestionBlock = (text: string, query: string, interactionMode:
 
   return `${text.trim()}${recommendation}\n\n**Play in chat:**\n\`\`\`game\n{"type":"${selected}","title":"${AVAILABLE_GAMES.find((item) => item.key === selected)?.label || 'Nanobot Game'}","description":"Tap Reset to start."}\n\`\`\``;
 };
-
-const parseTabsBlock = (raw: string): TabsBlock[] => {
-  const lines = raw.split(/\r?\n/);
-  const tabs: TabsBlock[] = [];
-  let current: TabsBlock | null = null;
-
-  lines.forEach((line) => {
-    // Match only explicit tab declarations to avoid false positives from regular bold markdown
-    const match = line.match(/^\s*(?:\*\*)?\s*Tab\s*:\s*(.+?)\s*(?:\*\*)?\s*$/i);
-
-    if (match) {
-      if (current) tabs.push(current);
-      let label = match[1].trim();
-      label = label.replace(/\*\*/g, '').replace(/^tab[\s:]+/i, '').trim();
-      current = { label: label || 'Tab', content: '' };
-      return;
-    }
-    if (!current) {
-      current = { label: 'Overview', content: '' };
-    }
-    if (line.trim()) {
-      current.content += `${line}\n`;
-    }
-  });
-
-  if (current) tabs.push(current);
-  return tabs.map((tab) => ({ ...tab, content: tab.content.trim() }))
-    .filter((tab) => tab.content && tab.label);
-};
-
-const MarkdownBody = ({ content }: { content: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-    {content}
-  </ReactMarkdown>
-);
-
-const TabsBlockView = ({ raw }: { raw: string }) => {
-  const tabs = useMemo(() => parseTabsBlock(raw), [raw]);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const active = tabs[activeIndex] || tabs[0];
-
-  if (!tabs.length || !active) {
-    return (
-      <pre className="whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
-        {raw}
-      </pre>
-    );
-  }
-
-  return (
-    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] px-3 py-2 overflow-x-auto">
-        {tabs.map((tab, index) => (
-          <button
-            key={`${tab.label}-${index}`}
-            type="button"
-            onClick={() => setActiveIndex(index)}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
-              index === activeIndex
-                ? 'bg-[var(--foreground)] text-[var(--background)]'
-                : 'bg-[var(--surface-strong)] text-[var(--muted-strong)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div className="p-3 text-sm overflow-x-auto">
-        <MarkdownBody content={active.content} />
-      </div>
-    </div>
-  );
-};
-
-const parseTableBlock = (raw: string): TableBlock | null => {
-  try {
-    const parsed = JSON.parse(raw) as {
-      title?: string;
-      columns?: string[];
-      rows?: Array<string[] | Record<string, string | number | boolean | null | undefined>>;
-    };
-
-    if (Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) {
-      const rows = parsed.rows.map((row) => {
-        if (Array.isArray(row)) return row.map((value) => String(value ?? ''));
-        return parsed.columns!.map((key) => String((row as Record<string, unknown>)?.[key] ?? ''));
-      });
-      return {
-        title: parsed.title,
-        columns: parsed.columns.map((col) => String(col)),
-        rows,
-      };
-    }
-  } catch {
-  }
-
-  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  let title = '';
-  let columns: string[] = [];
-  const rows: string[][] = [];
-
-  lines.forEach((line) => {
-    const lower = line.toLowerCase();
-    if (lower.startsWith('title:')) {
-      title = line.split(':').slice(1).join(':').trim();
-      return;
-    }
-    if (lower.startsWith('columns:')) {
-      columns = line
-        .split(':')
-        .slice(1)
-        .join(':')
-        .split(/[;,]/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-      return;
-    }
-    if (lower.startsWith('row:')) {
-      const row = line
-        .split(':')
-        .slice(1)
-        .join(':')
-        .split(/[;,]/)
-        .map((item) => item.trim());
-      if (row.length) rows.push(row);
-    }
-  });
-
-  if (!columns.length || !rows.length) return null;
-
-  const normalizedRows = rows.map((row) =>
-    Array.from({ length: columns.length }, (_, index) => row[index] ?? '')
-  );
-
-  return {
-    title: title || undefined,
-    columns,
-    rows: normalizedRows,
-  };
-};
-
-const TableBlockView = ({ raw }: { raw: string }) => {
-  const parsed = useMemo(() => parseTableBlock(raw), [raw]);
-
-  if (!parsed) {
-    return (
-      <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
-        {raw}
-      </pre>
-    );
-  }
-
-  return (
-    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 overflow-hidden">
-      {parsed.title && <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">{parsed.title}</p>}
-      <div className="overflow-x-auto -mx-3 -mb-3 px-3 pb-3">
-        <table className="min-w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-[var(--border)]">
-              {parsed.columns.map((column) => (
-                <th key={column} className="px-2 sm:px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-strong)] whitespace-nowrap">
-                  {column}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {parsed.rows.map((row, rowIndex) => (
-              <tr key={`${row.join('-')}-${rowIndex}`} className="border-b border-[var(--border)] last:border-b-0">
-                {row.map((cell, cellIndex) => (
-                  <td key={`${cell}-${cellIndex}`} className="px-2 sm:px-3 py-2 text-[var(--foreground)] text-xs sm:text-sm whitespace-normal break-words">
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
-const ProgressBlockView = ({ raw }: { raw: string }) => {
-  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  let json: {
-    label?: string;
-    value?: number | string;
-    max?: number;
-    left?: string;
-    right?: string;
-  } | null = null;
-
-  try {
-    json = JSON.parse(raw) as {
-      label?: string;
-      value?: number | string;
-      max?: number;
-      left?: string;
-      right?: string;
-    };
-  } catch {
-    json = null;
-  }
-
-  const getValue = (key: string) => {
-    const match = lines.find((line) => line.toLowerCase().startsWith(`${key}:`));
-    return match ? match.split(':').slice(1).join(':').trim() : '';
-  };
-  const label = json?.label || getValue('label') || 'Signal';
-  const valueText =
-    json?.value !== undefined
-      ? `${json.value}${json?.max ? `/${json.max}` : ''}`
-      : getValue('value') || '5/10';
-  const left = json?.left || getValue('left') || 'Low';
-  const right = json?.right || getValue('right') || 'High';
-
-  const numericMatch = valueText.match(/(\d+(?:\.\d+)?)/);
-  const numericValue = numericMatch ? Number(numericMatch[1]) : 5;
-  const maxValue = valueText.includes('/')
-    ? Number(valueText.split('/')[1]) || 10
-    : 10;
-  const percent = Math.min(100, Math.max(0, (numericValue / maxValue) * 100));
-
-  return (
-    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 overflow-hidden">
-      <div className="flex items-center justify-between text-xs uppercase tracking-widest text-[var(--muted)] gap-2">
-        <span className="truncate flex-shrink-0">{label}</span>
-        <span className="text-right flex-shrink-0 ml-auto">{valueText}</span>
-      </div>
-      <div className="mt-2 h-2 w-full rounded-full bg-[var(--surface-strong)] overflow-hidden">
-        <div
-          className="h-2 rounded-full bg-[var(--foreground)]"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-[var(--muted)] gap-1">
-        <span className="flex-shrink-0">{left}</span>
-        <span className="flex-shrink-0">{right}</span>
-      </div>
-    </div>
-  );
-};
-
-const parseGameBlock = (raw: string): GameConfig | null => {
-  try {
-    const parsed = JSON.parse(raw) as Partial<GameConfig>;
-    if (parsed.type === 'tic_tac_toe' || parsed.type === 'snake' || parsed.type === 'target_tap' || parsed.type === 'number_hunt' || parsed.type === 'memory_flip') {
-      return {
-        type: parsed.type,
-        title: parsed.title,
-        description: parsed.description,
-        difficulty: parsed.difficulty,
-      };
-    }
-  } catch {
-  }
-
-  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const read = (key: string) => {
-    const line = lines.find((item) => item.toLowerCase().startsWith(`${key}:`));
-    return line ? line.split(':').slice(1).join(':').trim() : '';
-  };
-  const type = read('type').toLowerCase();
-  if (type !== 'tic_tac_toe' && type !== 'snake' && type !== 'target_tap' && type !== 'number_hunt' && type !== 'memory_flip') return null;
-  const difficulty = read('difficulty');
-
-  return {
-    type,
-    title: read('title') || undefined,
-    description: read('description') || undefined,
-    difficulty: difficulty === 'easy' || difficulty === 'medium' || difficulty === 'hard' ? difficulty : undefined,
-  } as GameConfig;
-};
-
-const GameBlockView = ({ raw }: { raw: string }) => {
-  const config = useMemo(() => parseGameBlock(raw), [raw]);
-  if (!config) {
-    return (
-      <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
-        {raw}
-      </pre>
-    );
-  }
-
-  return <NanobotGame config={config} />;
-};
-
-const RichMarkdown = ({ content }: { content: string }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    rehypePlugins={[rehypeRaw]}
-    components={{
-      code: ({ className, children }) => {
-        const language = /language-([\w-]+)/.exec(className || '')?.[1];
-        const raw = String(children).trim();
-        const isInline = !className;
-
-        if (!isInline && language === 'progress') {
-          return <ProgressBlockView raw={raw} />;
-        }
-
-        if (!isInline && language === 'slider') {
-          return <ProgressBlockView raw={raw} />;
-        }
-
-        if (!isInline && language === 'tabs') {
-          return <TabsBlockView raw={raw} />;
-        }
-
-        if (!isInline && language === 'table') {
-          return <TableBlockView raw={raw} />;
-        }
-
-        if (!isInline && language === 'game') {
-          return <GameBlockView raw={raw} />;
-        }
-
-        if (!isInline && language === 'diagram') {
-          return (
-            <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
-              {raw}
-            </pre>
-          );
-        }
-
-        // Chart detection - handle json-chart code blocks
-        if (!isInline && (language === 'json-chart' || language === 'chart')) {
-          try {
-            const chartData = JSON.parse(raw) as ChartData;
-            return <ChartRenderer chartData={chartData} />;
-          } catch (error) {
-            console.error('Failed to parse chart data:', error);
-            // Fall through to regular code block display
-          }
-        }
-
-        if (isInline) {
-          return (
-            <code className="rounded bg-[var(--surface-strong)] px-1.5 py-0.5 text-xs text-[var(--foreground)]">
-              {children}
-            </code>
-          );
-        }
-
-        return (
-          <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
-            {raw}
-          </pre>
-        );
-      },
-      p: ({ children }) => {
-        // Skip rendering empty or whitespace-only paragraphs
-        const text = String(children).trim();
-        if (!text) return null;
-        
-        // Reduce paragraph margins to prevent gaps before tables
-        return (
-          <p className="text-sm text-[var(--foreground)] my-1">{children}</p>
-        );
-      },
-    }}
-  >
-    {content}
-  </ReactMarkdown>
-);
 
 export default function HomeView() {
   const router = useRouter();
@@ -1994,7 +1625,13 @@ export default function HomeView() {
       .replace(/Voice\s+Profile:[\s\S]*$/gi, '')
       .replace(/\r\n/g, '\n');
 
-    return withoutMetadata.trim();
+    const withoutTabsAndSliderMarkdown = settings.narrationType === 'Educational'
+      ? withoutMetadata
+          .replace(/```tabs\s*([\s\S]*?)```/gi, (_match, raw) => String(raw || '').trim())
+          .replace(/```slider\s*([\s\S]*?)```/gi, (_match, raw) => String(raw || '').trim())
+      : withoutMetadata;
+
+    return withoutTabsAndSliderMarkdown.trim();
   };
 
   /**
@@ -3218,7 +2855,7 @@ export default function HomeView() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-[var(--background)] text-[var(--foreground)] font-sans overflow-hidden">
+    <div className="flex h-screen w-full max-w-[100vw] min-w-0 bg-[var(--background)] text-[var(--foreground)] font-sans overflow-hidden">
       {/* Sidebar - History */}
       <aside className="w-64 border-r border-[var(--border)] hidden md:flex md:flex-col">
         <Link
@@ -3226,8 +2863,8 @@ export default function HomeView() {
           onClick={stopNarrationForUiChange}
           className="p-6 border-b border-[var(--border)] flex items-center gap-3 hover:bg-[var(--surface-strong)] transition-colors"
         >
-          <div className="w-8 h-8 bg-[var(--foreground)] rounded-md flex items-center justify-center">
-            <span className="text-[var(--background)] font-bold text-xl">S</span>
+          <div className="shrink-0 flex items-center justify-center">
+            <Image src="/eyes-logo.svg" alt="Self Fles eyes logo" width={34} height={20} priority />
           </div>
           <span className="font-bold tracking-tight text-lg">Self \ Fles</span>
         </Link>
@@ -3356,7 +2993,7 @@ export default function HomeView() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative bg-[var(--background)]">
+      <main className="flex-1 min-w-0 flex flex-col relative bg-[var(--background)] overflow-x-hidden">
         {/* Header (Mobile) */}
         <header className="md:hidden p-4 border-b border-[var(--border)] flex justify-between items-center">
           <span className="font-bold">Self \ Fles</span>
@@ -3373,9 +3010,9 @@ export default function HomeView() {
         </header>
 
         {isMobileMenuOpen && (
-          <div className="md:hidden fixed inset-0 z-50 bg-[var(--background)]">
-            <div className="absolute inset-0 w-full bg-[var(--background)] shadow-xl flex flex-col">
-              <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">
+          <div className="md:hidden fixed inset-0 z-[300] bg-[var(--background)]">
+            <div className="h-[100dvh] w-full bg-[var(--background)] shadow-xl flex flex-col overflow-hidden pt-[env(safe-area-inset-top)]">
+              <div className="shrink-0 p-4 border-b border-[var(--border)] flex items-center justify-between">
                 <span className="font-bold">Menu</span>
                 <button
                   type="button"
@@ -3389,7 +3026,7 @@ export default function HomeView() {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col">
+              <div className="flex-1 min-h-0 overflow-y-auto p-4">
                 <div className="flex items-center gap-2 mb-4 text-[var(--muted)] text-xs font-semibold uppercase tracking-widest">
                   <HistoryIcon className="w-4 h-4" />
                   <span>Neural History</span>
@@ -3429,7 +3066,7 @@ export default function HomeView() {
                   </button>
                 </div>
 
-                <div className="space-y-1 flex-1 overflow-y-auto">
+                <div className="space-y-1">
                   {filteredHistory.length === 0 ? (
                     <p className="text-[var(--muted)] text-sm italic">No recent explorations</p>
                   ) : (
@@ -3482,7 +3119,7 @@ export default function HomeView() {
                 </div>
               </div>
 
-              <div className="p-4 border-t border-[var(--border)] flex flex-col gap-2">
+              <div className="shrink-0 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] border-t border-[var(--border)] flex flex-col gap-2">
                 <div className="px-3 py-1 flex items-center gap-2 text-[10px] text-[var(--muted)] uppercase tracking-widest">
                   <span>{settings.language} Mode</span>
                 </div>
@@ -3526,18 +3163,9 @@ export default function HomeView() {
             <div className="max-w-3xl mx-auto py-8 md:py-10 space-y-6 px-0">
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
-                  <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center border border-[var(--border)]">
-                    <span className="text-3xl font-bold">S</span>
-                  </div>
-                  <div>
-                    <div className="brand-flip text-4xl md:text-5xl font-bold tracking-tight">
-                      <span className="brand-flip-word">Self</span>
-                      <span className="brand-flip-slash">{"\\"}</span>
-                      <span className="brand-flip-word brand-flip-delay">Fles</span>
-                    </div>
-                    <p className="text-[var(--muted)] max-w-sm mx-auto mt-3 text-sm md:text-base">
-                      Flip into calm, grounded narration that listens back.
-                    </p>
+                  <div className="flex items-center justify-center gap-3 sm:gap-5">
+                    <ThemeSphere />
+                    <ThemeSphere />
                   </div>
                 </div>
               )}
@@ -3553,7 +3181,7 @@ export default function HomeView() {
                     data-message-id={isUser ? msg.id : undefined}
                     className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                   >
-                    <div className={`max-w-[92%] md:max-w-[85%] space-y-2 ${isUser ? 'items-end' : 'items-start'}`}>
+                    <div className={`min-w-0 max-w-[92%] md:max-w-[85%] space-y-2 ${isUser ? 'items-end' : 'items-start'}`}>
                       <div className={`p-2.5 sm:p-3.5 md:p-4 rounded-2xl text-xs sm:text-sm md:text-[15px] leading-relaxed ${
                         isUser
                           ? 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)]'
@@ -3565,7 +3193,7 @@ export default function HomeView() {
                           </div>
                         )}
                         {msg.role === 'assistant' ? (
-                          <div className="prose prose-sm max-w-none dark:prose-invert overflow-x-auto -mx-2 px-2">
+                          <div className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]">
                             {msg.media && (
                               <button
                                 type="button"
@@ -3592,7 +3220,11 @@ export default function HomeView() {
                               </button>
                             )}
                             {sanitizeNarrationForDisplay(displayContent).trim() && (
-                              <RichMarkdown content={sanitizeNarrationForDisplay(displayContent)} />
+                              <RichMarkdown
+                                content={sanitizeNarrationForDisplay(displayContent)}
+                                enableTabs={settings.narrationType !== 'Educational'}
+                                enableSlider={settings.narrationType !== 'Educational'}
+                              />
                             )}
                           </div>
                         ) : (
@@ -3628,7 +3260,10 @@ export default function HomeView() {
                         {msg.referencesHtml && (
                           <div className="mt-3 px-2">
                             <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] mb-2">References</p>
-                            <div dangerouslySetInnerHTML={{ __html: msg.referencesHtml }} />
+                            <div
+                              className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]"
+                              dangerouslySetInnerHTML={{ __html: msg.referencesHtml }}
+                            />
                           </div>
                         )}
                       </>
@@ -3850,27 +3485,16 @@ export default function HomeView() {
         )}
 
         {interactionMode === "read" && (
-          <div className={`sticky bottom-0 border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-2 md:p-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
+          <div className={`sticky bottom-0 z-[120] overflow-visible border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-2 md:p-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
             <div className="max-w-3xl mx-auto w-full">
-              <div className="relative md:relative w-full z-10 bg-[var(--background)] md:p-0">
+              <div className="relative md:relative w-full z-[120] bg-[var(--background)] md:p-0 overflow-visible">
                 {/* New Chat Button + SearchBar */}
-                <div className="flex gap-2 items-start w-full">
-                  {messages.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={startNewChatSession}
-                      className="mt-2.5 p-2 rounded-xl bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all flex-shrink-0"
-                      title="New topic"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                    </button>
-                  )}
-                  <div className="flex-1">
+                <div className="flex min-w-0 gap-2 items-start w-full">
+                  <div className="flex-1 min-w-0">
                     <SearchBar 
                       disabled={userMessages.length >= 10}
                       placeholder={userMessages.length >= 10 ? "Limit reached - start new chat" : "Ask a story, case, or question..."}
+                      onNewTopic={messages.length > 0 ? startNewChatSession : undefined}
                       selectedTool={selectedTool}
                       selectedModel={selectedModel}
                       currentMode={selectedTool || 'text'}
@@ -3961,7 +3585,10 @@ export default function HomeView() {
                           {selectedHistory.referencesHtml && index === getListenConversation(selectedHistory).filter(e => e.role === 'assistant').length - 1 && (
                             <div className="mt-3">
                               <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] mb-2">References</p>
-                              <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: selectedHistory.referencesHtml }} />
+                              <div
+                                className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]"
+                                dangerouslySetInnerHTML={{ __html: selectedHistory.referencesHtml }}
+                              />
                             </div>
                           )}
                         </>

@@ -79,6 +79,7 @@ export { type AttachedFile };
 
 interface SearchBarProps {
   onSearch: (query: string, attachments?: AttachedFile[]) => void;
+  onNewTopic?: () => void;
   onToolSelect?: (tool: string) => void;
   onModelChange?: (model: string) => void;
   onMicClick?: () => void;
@@ -94,6 +95,7 @@ interface SearchBarProps {
 
 export default function SearchBar({
   onSearch,
+  onNewTopic,
   onToolSelect,
   onModelChange,
   onMicClick,
@@ -235,279 +237,234 @@ export default function SearchBar({
   const recommendedModels = getModeRecommendedModels();
 
   return (
-    <div className="w-full flex flex-col gap-2">
+    <div className="relative z-[220] isolate w-full min-w-0 flex flex-col gap-2">
       {/* Main Search Bar Container */}
       <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl transition-all hover:border-[var(--muted-strong)] focus-within:border-[var(--foreground)]">
         {/* Top Row: + Button and Controls */}
         <div className="flex items-center gap-1.5 p-2">
-          {/* + Button (Only on New Chat) */}
-          {isNewChat && (
-            <div className="relative flex-shrink-0" ref={toolMenuRef}>
+          <div className="min-w-0 flex-1">
+            <div className="flex w-full min-w-0 items-center gap-1.5 pr-1">
+              {onNewTopic && (
+                <button
+                  type="button"
+                  onClick={onNewTopic}
+                  disabled={disabled}
+                  className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                  title="New topic"
+                  aria-label="Start new topic"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
+              )}
+
+              {isNewChat && (
+                <div className="relative flex-shrink-0" ref={toolMenuRef}>
+                  <button
+                    onClick={() => setIsToolMenuOpen(!isToolMenuOpen)}
+                    disabled={disabled}
+                    className={`p-1.5 rounded-lg border transition-all ${
+                      isToolMenuOpen
+                        ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
+                        : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    title="New Chat with Tools"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+
+                  {isToolMenuOpen && (
+                    <div className="fixed left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] bottom-24 z-[1200] max-h-[min(20rem,calc(100dvh-8rem))] bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg overflow-hidden overscroll-contain sm:absolute sm:bottom-full sm:mb-2 sm:left-0 sm:right-auto sm:w-64">
+                      <div className="px-3 py-2 border-b border-[var(--border)]">
+                        <p className="text-xs uppercase tracking-wider text-[var(--muted)] font-semibold">New Session</p>
+                      </div>
+                      <div className="py-1 max-h-[min(18rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
+                        {TOOL_OPTIONS.map((tool) => (
+                          <button
+                            key={tool.type}
+                            onClick={() => handleToolClick(tool.type)}
+                            className="w-full text-left px-3 py-2 hover:bg-[var(--surface-strong)] transition-colors text-sm"
+                          >
+                            <div className="flex items-start gap-2">
+                              <span className="text-lg mt-0.5 flex-shrink-0">{tool.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-[var(--foreground)]">{tool.label}</p>
+                                <p className="text-xs text-[var(--muted)] truncate">{tool.description}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="relative flex-shrink-0">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.gif"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={disabled}
+                  className={`p-1.5 rounded-lg border transition-all ${
+                    attachedFiles.length > 0
+                      ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
+                      : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
+                  } disabled:opacity-50 disabled:cursor-not-allowed relative`}
+                  title="Attach Files"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4h-4l6-6 6 6h-4z" />
+                  </svg>
+                  {attachedFiles.length > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                      {attachedFiles.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {(currentMode === 'image' || currentMode === 'video') && (
+                <button
+                  onClick={() => setShowConfigModal(!showConfigModal)}
+                  disabled={disabled}
+                  className={`p-1.5 rounded-lg border transition-all ${
+                    showConfigModal
+                      ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
+                      : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
+                  } disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
+                  title="Generation Settings"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+              )}
+
+              <div className="relative min-w-0 flex-shrink" ref={modelMenuRef}>
+                <button
+                  onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                  disabled={disabled}
+                  className={`inline-flex min-w-0 max-w-[11rem] items-center px-2 py-1.5 rounded-lg border text-xs font-medium transition-all whitespace-nowrap max-[420px]:max-w-[8.5rem] max-[360px]:max-w-[6.5rem] sm:max-w-xs ${
+                    isModelMenuOpen
+                      ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
+                      : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  title={currentModel?.label || "Model"}
+                >
+                  <svg className="mr-1 h-3 w-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fillRule="evenodd"
+                      d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 10l-4.293-4.293a1 1 0 010-1.414z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <span className="block max-w-full truncate">{currentModel?.label || "Model"}</span>
+                </button>
+
+                {isModelMenuOpen && (
+                  <div className="fixed left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] bottom-24 z-[1200] max-h-[min(20rem,calc(100dvh-8rem))] bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg overflow-hidden overscroll-contain sm:absolute sm:bottom-full sm:mb-2 sm:left-0 sm:right-auto sm:w-72">
+                    <div className="px-3 py-2 border-b border-[var(--border)]">
+                      <p className="text-xs uppercase tracking-wider text-[var(--muted)] font-semibold">
+                        {currentMode && currentMode !== "text"
+                          ? `${currentMode.toUpperCase()} - Recommended Models`
+                          : "AI Model"}
+                      </p>
+                    </div>
+                    <div className="py-1 max-h-[min(18rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
+                      {recommendedModels.map((model) => (
+                        <button
+                          key={model.id}
+                          onClick={() => handleModelChange(model.id)}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                            selectedModel === model.id
+                              ? "bg-[var(--foreground)] text-[var(--background)] font-medium"
+                              : "hover:bg-[var(--surface-strong)] text-[var(--foreground)]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate">{model.label}</span>
+                            <span
+                              className={`text-xs whitespace-nowrap flex-shrink-0 ${
+                                selectedModel === model.id ? "opacity-100" : "text-[var(--muted)] opacity-60"
+                              }`}
+                            >
+                              {model.provider}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            {onMicClick && (
               <button
-                onClick={() => setIsToolMenuOpen(!isToolMenuOpen)}
+                onClick={onMicClick}
                 disabled={disabled}
-                className={`p-1.5 rounded-lg border transition-all ${
-                  isToolMenuOpen
-                    ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
+                className={`p-1.5 rounded-lg border transition-all flex-shrink-0 ${
+                  isListening
+                    ? "bg-red-500 text-white border-red-500 animate-pulse"
                     : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
-                title="New Chat with Tools"
+                title="Voice Input"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 1C6.48 1 2 4.58 2 9v10c0 4.42 4.48 8 10 8s10-3.58 10-8V9c0-4.42-4.48-8-10-8zm0 18c-4.41 0-8-2.91-8-6.5S7.59 4 12 4s8 2.91 8 6.5S16.41 19 12 19zm0-9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+                </svg>
+              </button>
+            )}
+
+            {shouldShowExpandButton && !isExpanded && (
+              <button
+                onClick={handleExpandToggle}
+                className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-all flex-shrink-0"
+                title="Expand"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
+                    d="M7 16V4m0 0L3 8m4-4l4 4m6-4v12m0 0l4-4m-4 4l-4-4"
                   />
                 </svg>
               </button>
-
-              {/* Tools Dropdown */}
-              {isToolMenuOpen && (
-                <div className="absolute bottom-full mb-2 left-0 z-50 w-64 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg overflow-hidden">
-                  <div className="px-3 py-2 border-b border-[var(--border)]">
-                    <p className="text-xs uppercase tracking-wider text-[var(--muted)] font-semibold">
-                      New Session
-                    </p>
-                  </div>
-                  <div className="py-1 max-h-80 overflow-y-auto">
-                    {TOOL_OPTIONS.map((tool) => (
-                      <button
-                        key={tool.type}
-                        onClick={() => handleToolClick(tool.type)}
-                        className="w-full text-left px-3 py-2 hover:bg-[var(--surface-strong)] transition-colors text-sm"
-                      >
-                        <div className="flex items-start gap-2">
-                          <span className="text-lg mt-0.5 flex-shrink-0">
-                            {tool.icon}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-[var(--foreground)]">
-                              {tool.label}
-                            </p>
-                            <p className="text-xs text-[var(--muted)] truncate">
-                              {tool.description}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Attachment Button */}
-          <div className="relative flex-shrink-0">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.gif"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled}
-              className={`p-1.5 rounded-lg border transition-all ${
-                attachedFiles.length > 0
-                  ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
-                  : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
-              } disabled:opacity-50 disabled:cursor-not-allowed relative`}
-              title="Attach Files"
-            >
-              <svg
-                className="w-4 h-4"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4h-4l6-6 6 6h-4z" />
-              </svg>
-              {attachedFiles.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                  {attachedFiles.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Configuration Button (for image/video modes) */}
-          {(currentMode === 'image' || currentMode === 'video') && (
-            <button
-              onClick={() => setShowConfigModal(!showConfigModal)}
-              disabled={disabled}
-              className={`p-1.5 rounded-lg border transition-all ${
-                showConfigModal
-                  ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
-                  : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
-              } disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
-              title="Generation Settings"
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-          )}
-
-          {/* Model Selector Dropdown */}
-          <div className="relative flex-shrink-0" ref={modelMenuRef}>
-            <button
-              onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-              disabled={disabled}
-              className={`px-2 py-1.5 rounded-lg border text-xs font-medium transition-all whitespace-nowrap max-w-xs ${
-                isModelMenuOpen
-                  ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
-                  : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
-              } disabled:opacity-50 disabled:cursor-not-allowed truncate`}
-              title={currentModel?.label || "Model"}
-            >
-              <svg
-                className="w-3 h-3 inline mr-1"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 10l-4.293-4.293a1 1 0 010-1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span className="inline truncate">
-                {currentModel?.label || "Model"}
-              </span>
-            </button>
-
-            {/* Model Dropdown */}
-            {isModelMenuOpen && (
-              <div className="absolute bottom-full mb-2 left-0 z-50 w-72 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg overflow-hidden">
-                <div className="px-3 py-2 border-b border-[var(--border)]">
-                  <p className="text-xs uppercase tracking-wider text-[var(--muted)] font-semibold">
-                    {currentMode && currentMode !== "text" 
-                      ? `${currentMode.toUpperCase()} - Recommended Models` 
-                      : "AI Model"}
-                  </p>
-                </div>
-                <div className="py-1 max-h-80 overflow-y-auto">
-                  {recommendedModels.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => handleModelChange(model.id)}
-                      className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                        selectedModel === model.id
-                          ? "bg-[var(--foreground)] text-[var(--background)] font-medium"
-                          : "hover:bg-[var(--surface-strong)] text-[var(--foreground)]"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate">{model.label}</span>
-                        <span
-                          className={`text-xs whitespace-nowrap flex-shrink-0 ${
-                            selectedModel === model.id
-                              ? "opacity-100"
-                              : "text-[var(--muted)] opacity-60"
-                          }`}
-                        >
-                          {model.provider}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
             )}
+
+            <button
+              onClick={handleSearch}
+              disabled={!query.trim() || disabled}
+              className={`p-1.5 rounded-lg transition-all flex-shrink-0 ${
+                query.trim() && !disabled
+                  ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
+                  : "bg-[var(--surface-strong)] text-[var(--muted)] cursor-not-allowed"
+              }`}
+              title="Send (Enter)"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              </svg>
+            </button>
           </div>
-
-          <div className="flex-1" />
-
-          {/* Mic Button */}
-          {onMicClick && (
-            <button
-              onClick={onMicClick}
-              disabled={disabled}
-              className={`p-1.5 rounded-lg border transition-all flex-shrink-0 ${
-                isListening
-                  ? "bg-red-500 text-white border-red-500 animate-pulse"
-                  : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)]"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title="Voice Input"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path d="M12 1C6.48 1 2 4.58 2 9v10c0 4.42 4.48 8 10 8s10-3.58 10-8V9c0-4.42-4.48-8-10-8zm0 18c-4.41 0-8-2.91-8-6.5S7.59 4 12 4s8 2.91 8 6.5S16.41 19 12 19zm0-9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
-              </svg>
-            </button>
-          )}
-
-          {/* Expand Button */}
-          {shouldShowExpandButton && !isExpanded && (
-            <button
-              onClick={handleExpandToggle}
-              className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-all flex-shrink-0"
-              title="Expand"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M7 16V4m0 0L3 8m4-4l4 4m6-4v12m0 0l4-4m-4 4l-4-4"
-                />
-              </svg>
-            </button>
-          )}
-
-          {/* Send Button */}
-          <button
-            onClick={handleSearch}
-            disabled={!query.trim() || disabled}
-            className={`p-1.5 rounded-lg transition-all flex-shrink-0 ${
-              query.trim() && !disabled
-                ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
-                : "bg-[var(--surface-strong)] text-[var(--muted)] cursor-not-allowed"
-            }`}
-            title="Send (Enter)"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M14 5l7 7m0 0l-7 7m7-7H3"
-              />
-            </svg>
-          </button>
         </div>
 
         {/* Textarea */}
