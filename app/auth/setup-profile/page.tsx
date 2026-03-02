@@ -308,8 +308,8 @@ export default function SetupProfile() {
                 <label className="block text-sm font-medium text-[var(--muted-strong)] mb-2">
                   Response Style
                 </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {["Realistic", "Dramatic", "Educational"].map((style) => (
+                <div className="grid grid-cols-2 gap-3">
+                  {["Realistic", "Dramatic", "Educational", "Personalized"].map((style) => (
                     <button
                       key={style}
                       onClick={() =>

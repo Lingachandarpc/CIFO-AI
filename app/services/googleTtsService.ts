@@ -1,5 +1,10 @@
 import { Language, VoiceGender, DEFAULT_GOOGLE_VOICE } from '../types';
 
+export type GoogleTtsAudioPayload = {
+  audio: string;
+  mimeType: string;
+};
+
 export type GoogleVoice = {
   name: string;
   languageCodes: string[];
@@ -121,7 +126,7 @@ export async function generateSpeechWithGoogle(
   languageCode: string,
   speakingRate = 1.0,
   pitch = 0
-): Promise<string> {
+): Promise<GoogleTtsAudioPayload> {
   try {
     const ssml = buildGoogleSsml(text, languageCode);
     const res = await fetch('/api/chronoread/google/tts', {
@@ -140,13 +145,16 @@ export async function generateSpeechWithGoogle(
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
       console.error('Google TTS proxy error:', payload);
-      return '';
+      return { audio: '', mimeType: 'audio/mpeg' };
     }
 
     const data = await res.json();
-    return data.audio || '';
+    return {
+      audio: data.audio || '',
+      mimeType: data.mimeType || 'audio/mpeg',
+    };
   } catch (error) {
     console.error('Error generating speech with Google TTS:', error);
-    return '';
+    return { audio: '', mimeType: 'audio/mpeg' };
   }
 }

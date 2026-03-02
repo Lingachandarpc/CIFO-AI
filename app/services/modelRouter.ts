@@ -516,6 +516,8 @@ function handleExplicitModelSelection(
     'gemini': 'gemini-flash',
     'gemini-pro': 'gemini-1.5-pro',
     'gemini-flash': 'gemini-flash',
+    'gemini-1.5-flash': 'gemini-flash',
+    'gemini-2.5-flash': 'gemini-flash',
     'grok': 'grok-3',
     'grok-1': 'grok-3',
     'grok-3': 'grok-3',

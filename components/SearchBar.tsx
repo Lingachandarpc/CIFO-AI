@@ -35,12 +35,12 @@ const TOOL_OPTIONS: ToolOption[] = [
     icon: "🎨",
     description: "Generate images with Gemini or Grok",
   },
-  {
-    type: "video",
-    label: "Video Creation",
-    icon: "🎬",
-    description: "Create videos with Veo or text-to-video",
-  },
+  // {
+  //   type: "video",
+  //   label: "Video Creation",
+  //   icon: "🎬",
+  //   description: "Create videos with Veo or text-to-video",
+  // },
   {
     type: "ocr",
     label: "OCR",
@@ -63,6 +63,8 @@ const TOOL_OPTIONS: ToolOption[] = [
 
 const AI_MODELS: AIModel[] = [
   { id: "auto", label: "Auto - Best Available", provider: "Auto", modes: ["text", "image", "video", "ocr", "document"], description: "Smart routing picks the best model for your query" },
+  { id: "google-vision-ocr", label: "Google Vision OCR", provider: "Google", modes: ["ocr"], description: "Google Cloud Vision API text extraction" },
+  { id: "ocr-extended-response", label: "Extended Response", provider: "AI", modes: ["ocr"], description: "Extract text, then generate a detailed educational explanation" },
   // IMAGE MODELS
   { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "Google", modes: ["image"], description: "Fast, high-quality image generation" },
   { id: "imagen-4.0-generate-001", label: "Imagen 4.0 Generate", provider: "Google", modes: ["image"], description: "Google's premium image model — photorealistic" },
@@ -73,17 +75,19 @@ const AI_MODELS: AIModel[] = [
   { id: "veo-2.0-generate-001", label: "Veo 2.0 (Gemini)", provider: "Google", modes: ["video"], description: "Stable video generation — good for simple clips" },
   { id: "grok-imagine-video", label: "Grok Imagine Video (xAI)", provider: "xAI", modes: ["video"], description: "Creative short video generation" },
   // CHAT MODELS
-  { id: "gpt-4", label: "GPT-4 Turbo", provider: "OpenAI", modes: ["text", "ocr", "document"], description: "Best for complex reasoning & analysis" },
+  { id: "gpt-4", label: "GPT-4 Turbo", provider: "OpenAI", modes: ["text", "document"], description: "Best for complex reasoning & analysis" },
   { id: "gpt-3.5", label: "GPT-3.5 Turbo", provider: "OpenAI", modes: ["text", "document"], description: "Fast & cost-effective for simple queries" },
-  { id: "claude-opus", label: "Claude 3 Opus", provider: "Anthropic", modes: ["text", "ocr", "document"], description: "Most capable — deep research & writing" },
-  { id: "claude-sonnet", label: "Claude 3 Sonnet", provider: "Anthropic", modes: ["text", "ocr", "document"], description: "Balanced — great for most tasks" },
+  { id: "claude-opus", label: "Claude 3 Opus", provider: "Anthropic", modes: ["text", "document"], description: "Most capable — deep research & writing" },
+  { id: "claude-sonnet", label: "Claude 3 Sonnet", provider: "Anthropic", modes: ["text", "document"], description: "Balanced — great for most tasks" },
   { id: "claude-haiku", label: "Claude 3 Haiku", provider: "Anthropic", modes: ["text", "document"], description: "Fastest Claude — quick answers & summaries" },
-  { id: "gemini-pro", label: "Gemini 1.5 Pro", provider: "Google", modes: ["text", "ocr", "document"], description: "Long context & multimodal — best for large docs" },
-  { id: "gemini-flash", label: "Gemini 1.5 Flash", provider: "Google", modes: ["text", "ocr", "document"], description: "Ultra-fast with good accuracy" },
+  { id: "gemini-pro", label: "Gemini 1.5 Pro", provider: "Google", modes: ["text", "document"], description: "Long context & multimodal — best for large docs" },
+  { id: "gemini-flash", label: "Gemini 1.5 Flash", provider: "Google", modes: ["text", "document"], description: "Ultra-fast with good accuracy" },
   { id: "grok-1", label: "Grok-1", provider: "xAI", modes: ["text", "document"], description: "Real-time knowledge & witty responses" },
 ];
 
 export { type AttachedFile };
+
+const ATTACHMENTS_SESSION_KEY = "chronoread.searchbar.attachments";
 
 interface SearchBarProps {
   onSearch: (query: string, attachments?: AttachedFile[]) => void;
@@ -94,6 +98,7 @@ interface SearchBarProps {
   onConfigChange?: (config: { imageConfig?: Record<string, string>; videoConfig?: Record<string, number | string> }) => void;
   selectedTool?: string | null;
   selectedModel?: string;
+  disabledModelIds?: string[];
   currentMode?: string; // 'text' | 'image' | 'video' | 'ocr' | 'document'
   preferredTextProvider?: string; // 'auto' | 'openai' | 'claude-sonnet' | 'gemini' | 'xai'
   disabled?: boolean;
@@ -111,6 +116,7 @@ export default function SearchBar({
   onConfigChange,
   selectedTool,
   selectedModel = "auto",
+  disabledModelIds = [],
   currentMode = "text",
   preferredTextProvider = "auto",
   disabled = false,
@@ -123,7 +129,18 @@ export default function SearchBar({
   const [isToolMenuOpen, setIsToolMenuOpen] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = sessionStorage.getItem(ATTACHMENTS_SESSION_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as AttachedFile[];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((file) => !!file?.name && !!file?.base64);
+    } catch {
+      return [];
+    }
+  });
   const [imageConfig, setImageConfig] = useState({ size: '1024x1024', quality: 'standard', style: 'natural' });
   const [videoConfig, setVideoConfig] = useState({ duration: 5, resolution: '1080p', aspectRatio: '16:9' });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -134,6 +151,17 @@ export default function SearchBar({
   // Calculate line count
   const lineCount = query.split("\n").length;
   const shouldShowExpandButton = lineCount > 5;
+
+  useEffect(() => {
+    try {
+      if (!attachedFiles.length) {
+        sessionStorage.removeItem(ATTACHMENTS_SESSION_KEY);
+        return;
+      }
+      sessionStorage.setItem(ATTACHMENTS_SESSION_KEY, JSON.stringify(attachedFiles));
+    } catch {
+    }
+  }, [attachedFiles]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -169,7 +197,6 @@ export default function SearchBar({
     if (!query.trim() || disabled) return;
     onSearch(query, attachedFiles);
     setQuery("");
-    setAttachedFiles([]);
     setIsExpanded(false);
   };
 
@@ -187,15 +214,26 @@ export default function SearchBar({
       const reader = new FileReader();
       reader.onload = (event) => {
         const base64 = event.target?.result as string;
+        const base64Payload = base64.split(',')[1];
+        if (!base64Payload) return;
+
         const newFile: AttachedFile = {
           id: `${Date.now()}-${Math.random()}`,
           name: file.name,
           size: file.size,
           type: file.type,
-          base64: base64.split(',')[1], // Remove data:... prefix
+          base64: base64Payload,
           tool: selectedTool as AIToolType || 'image',
         };
-        setAttachedFiles(prev => [...prev, newFile]);
+        setAttachedFiles((prev) => {
+          const duplicateExists = prev.some((existing) => (
+            existing.name === file.name
+            && existing.size === file.size
+            && existing.base64 === base64Payload
+          ));
+          if (duplicateExists) return prev;
+          return [...prev, newFile];
+        });
       };
       reader.readAsDataURL(file);
     }
@@ -235,6 +273,10 @@ export default function SearchBar({
 
     const modeModels = AI_MODELS.filter((model) => model.modes.includes(activeMode));
 
+    if (activeMode === 'ocr') {
+      return modeModels.filter((model) => model.id === 'auto' || model.id === 'google-vision-ocr' || model.id === 'ocr-extended-response');
+    }
+
     if (activeMode !== "text" || preferredTextProvider === "auto") {
       return modeModels;
     }
@@ -252,6 +294,7 @@ export default function SearchBar({
   };
 
   const recommendedModels = getModeRecommendedModels();
+  const shouldShowSessionWarning = selectedTool === 'dashboard' || selectedTool === 'document';
 
   useEffect(() => {
     if (!recommendedModels.some((model) => model.id === selectedModel)) {
@@ -261,6 +304,16 @@ export default function SearchBar({
 
   return (
     <div className="relative w-full min-w-0 flex flex-col gap-2">
+      {shouldShowSessionWarning && (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-200"
+          role="status"
+          aria-live="polite"
+        >
+          Note: Generated results are not persisted to the database and will no longer be available after this session ends.
+        </div>
+      )}
+
       {/* Main Search Bar Container */}
       <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl transition-all hover:border-[var(--muted-strong)] focus-within:border-[var(--foreground)]">
         {/* Top Row: + Button and Controls */}
@@ -410,14 +463,24 @@ export default function SearchBar({
                       </p>
                     </div>
                     <div className="py-1 max-h-[min(18rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
-                      {recommendedModels.map((model) => (
+                      {recommendedModels.map((model) => {
+                        const isDisabledModel = disabledModelIds.includes(model.id);
+                        return (
                         <button
                           key={model.id}
-                          onClick={() => handleModelChange(model.id)}
+                          type="button"
+                          onClick={() => {
+                            if (!isDisabledModel) {
+                              handleModelChange(model.id);
+                            }
+                          }}
+                          disabled={isDisabledModel}
                           className={`w-full text-left px-3 py-2 text-sm transition-colors ${
                             selectedModel === model.id
                               ? "bg-[var(--foreground)] text-[var(--background)] font-medium"
-                              : "hover:bg-[var(--surface-strong)] text-[var(--foreground)]"
+                              : isDisabledModel
+                                ? "text-[var(--muted)] opacity-50 cursor-not-allowed"
+                                : "hover:bg-[var(--surface-strong)] text-[var(--foreground)]"
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -427,7 +490,7 @@ export default function SearchBar({
                                 selectedModel === model.id ? "opacity-100" : "text-[var(--muted)] opacity-60"
                               }`}
                             >
-                              {model.provider}
+                              {isDisabledModel ? `${model.provider} (Unavailable)` : model.provider}
                             </span>
                           </div>
                           {model.description && (
@@ -438,7 +501,8 @@ export default function SearchBar({
                             </p>
                           )}
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

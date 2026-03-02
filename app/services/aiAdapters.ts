@@ -9,6 +9,10 @@ import { generateNarrativeWithWebSearch as xaiOriginal } from './xaiService';
 import { MiddlewareContext } from './middlewareService';
 import OpenAI from 'openai';
 
+function withLanguageLock(query: string, language: string): string {
+  return `CRITICAL LANGUAGE LOCK: Respond entirely in ${language}. Do not switch to English unless the user explicitly asks for English.\n\nUser Query:\n${query}`;
+}
+
 // ============================================================================
 // Gemini Adapter
 // ============================================================================
@@ -24,16 +28,20 @@ export async function geminiAdapter(
     selectedModel?: string;
   }
 ): Promise<string> {
+  const lockedQuery = withLanguageLock(context.query, options.language);
   // Pass middleware's pre-fetched web results (includes WorldTimeAPI data for time queries)
   const result = await geminiOriginal(
-    context.query,
+    lockedQuery,
     options.narrationTime,
     options.narrationType,
     options.language,
     options.interactionMode,
     false, // Disable internal web search - middleware handles it
     context.chatHistory || [],
-    { profile: context.userContext.profile },
+    {
+      profile: context.userContext.profile,
+      attachments: context.userContext.attachments,
+    },
     context.webResults, // Pass pre-fetched results from middleware
     options.selectedModel
   );
@@ -56,9 +64,10 @@ export async function claudeAdapter(
     selectedModel?: string;
   }
 ): Promise<string> {
+  const lockedQuery = withLanguageLock(context.query, options.language);
   // Pass middleware's pre-fetched web results (includes WorldTimeAPI data for time queries)
   const result = await claudeOriginal(
-    context.query,
+    lockedQuery,
     options.narrationTime,
     options.narrationType,
     options.language,
@@ -88,6 +97,7 @@ export async function xaiAdapter(
     selectedModel?: string;
   }
 ): Promise<string> {
+  const lockedQuery = withLanguageLock(context.query, options.language);
   // Pre-check: fail fast if XAI_API_KEY is not configured
   if (!process.env.XAI_API_KEY) {
     throw new Error('X.AI API key not configured');
@@ -95,7 +105,7 @@ export async function xaiAdapter(
 
   // Pass middleware's pre-fetched web results (includes WorldTimeAPI data for time queries)
   const result = await xaiOriginal(
-    context.query,
+    lockedQuery,
     options.narrationTime,
     options.narrationType,
     options.language,
@@ -147,6 +157,8 @@ export async function openaiAdapter(
       'Tell the story with dramatic flair, engaging tension, and emotional depth.',
     Educational:
       'Tell the story in an educational style, focusing on learning outcomes and key insights.',
+    Personalized:
+      'Tailor the response to the user profile context (age, interests, personality pulse, bio, location) while staying factual and helpful.',
   };
 
   const styleInstruction =
@@ -207,6 +219,7 @@ export async function openaiAdapter(
     const originalQuestion = chatHistory[chatHistory.length - 3]?.content || context.query;
     finalQuery = `${originalQuestion} ${context.query}`;
   }
+  finalQuery = withLanguageLock(finalQuery, options.language);
 
   const clarificationContext = isRespondingToClarification && chatHistory.length >= 3
     ? '\n\nIMPORTANT: The user just provided clarification to your previous question. Use this information to answer their ORIGINAL question completely. Do not just acknowledge their response - provide the full answer they were seeking.'
@@ -245,10 +258,12 @@ Narrative Style: ${options.narrationType}
 ${styleInstruction}
 
 Rules:
+- Respond only in ${options.language}. Never switch languages.
 - Plain text only (no markdown, no tables, no emojis, no code blocks).
 - For Realistic style: Provide factual, accurate, complete answers. Use web search data when provided. Be thorough but concise (3-8 sentences as needed).
 - For Dramatic style: 2-5 engaging sentences with emotional depth.
 - For Educational style: 3-6 clear sentences focusing on key learning points.
+- For Personalized style: 3-7 sentences tailored to user profile context (interests, pulse, bio, age, location) without inventing facts.
 - Keep it crisp and conversational, suitable for audio narration.
 - End with a complete closing sentence.
 ${webContext ? 'IMPORTANT: Prioritize the current web information provided below over your training data. Use this for accuracy:' : ''}
@@ -260,10 +275,12 @@ Tell a ${timeDescription} engaging narration about:
 ${contextStr ? `\nContext: ${contextStr}` : ''}${clarificationContext}${helpfulnessGuideline}
 
 Instructions:
+- Respond only in ${options.language}. Never switch languages.
 - Duration: approximately ${options.narrationTime} minutes
 - Narrative Style: ${options.narrationType}
 - Language: ${options.language}
 - ${styleInstruction}
+- If style is Personalized, explicitly reference relevant user context naturally (interests/pulse/bio/location/age) where helpful.
 - Keep the narration engaging, clear, and suitable for reading
 - Target length: 300-500 words
 - Use minimal formatting: headings in **bold**, bullet lists where helpful

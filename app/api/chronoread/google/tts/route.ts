@@ -63,7 +63,7 @@ export async function POST(req: Request) {
           if (!data?.audioContent) {
             return NextResponse.json({ error: 'Google TTS returned no audio' }, { status: 502 });
           }
-          return NextResponse.json({ audio: data.audioContent });
+          return NextResponse.json({ audio: data.audioContent, mimeType: 'audio/mpeg' });
         }
       }
 
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Google TTS returned no audio' }, { status: 502 });
     }
 
-    return NextResponse.json({ audio: data.audioContent });
+    return NextResponse.json({ audio: data.audioContent, mimeType: 'audio/mpeg' });
   } catch (err) {
     console.error('Google TTS route error:', err);
     return NextResponse.json({ error: 'Google TTS generation failed' }, { status: 500 });

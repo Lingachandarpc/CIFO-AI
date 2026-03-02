@@ -52,10 +52,11 @@ export async function POST(req: Request) {
       );
     }
 
+    const mimeType = res.headers.get('content-type') || 'audio/mpeg';
     const arrayBuffer = await res.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString('base64');
 
-    return NextResponse.json({ audio: base64 });
+    return NextResponse.json({ audio: base64, mimeType });
   } catch (err) {
     console.error('ElevenLabs TTS route error:', err);
     return NextResponse.json(

@@ -166,6 +166,7 @@ export async function generateNarrativeWithWebSearch(
       'Realistic': 'Tell the story in a realistic, factual, and grounded manner with real-world examples.',
       'Dramatic': 'Tell the story with dramatic flair, engaging tension, and emotional depth.',
       'Educational': 'Tell the story in an educational style, focusing on learning outcomes and key insights. In READ mode, use advanced formatting (tables/charts/tabs/progress/diagrams) only when it genuinely improves understanding.',
+      'Personalized': 'Tailor the response to the user profile context (age, interests, personality pulse, bio, location) while staying factual and helpful.',
     };
 
     const styleInstruction = narrativeStyleGuide[narrationType] || narrativeStyleGuide['Realistic'];
@@ -244,6 +245,7 @@ Rules:
 - For Realistic style: 2-5 sentences maximum. Be concise but complete. Prioritize web search data.
 - For Dramatic style: 2-5 engaging sentences with emotional depth.
 - For Educational style: 3-6 clear sentences focusing on key learning points.
+- For Personalized style: 3-7 sentences tailored to known user profile fields (interests, pulse, bio, age, location).
 - Keep it crisp and conversational, suitable for audio narration.
 - End with a complete closing sentence.
 ${enableWebSearch && searchContext ? '\nIMPORTANT: Prioritize the current web information provided below over your training data. Use this for accuracy:' : ''}
@@ -274,6 +276,7 @@ Instructions:
 - Narrative Style: ${narrationType}
 - Language: ${language}
 - ${styleInstruction}
+- If style is Personalized, naturally reference relevant user profile context where appropriate.
 ${narrationType === 'Realistic' ? '- Length: 2-15 lines. Be comprehensive but concise.' : `- Duration: approximately ${narrationTime} minutes`}
 - Keep the narration engaging, clear, and suitable for reading
 - Use minimal formatting: headings in **bold**, bullet lists where helpful

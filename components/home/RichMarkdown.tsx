@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -9,6 +9,7 @@ import NanobotGame, { type GameConfig } from '../NanobotGame';
 
 type TabsBlock = { label: string; content: string };
 type TableBlock = { title?: string; columns: string[]; rows: string[][] };
+type CanvasBlock = { title?: string; content: string };
 
 const parseTabsBlock = (raw: string): TabsBlock[] => {
   const lines = raw.split(/\r?\n/);
@@ -307,6 +308,92 @@ const GameBlockView = ({ raw }: { raw: string }) => {
   return <NanobotGame config={config} />;
 };
 
+const DiagramBlockView = ({ raw }: { raw: string }) => {
+  const [svg, setSvg] = useState<string>('');
+  const [hasError, setHasError] = useState(false);
+  const renderId = useMemo(() => `mermaid-${Math.random().toString(36).slice(2, 10)}`, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const renderDiagram = async () => {
+      try {
+        const mermaidModule = await import('mermaid');
+        const mermaid = mermaidModule.default;
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'dark' });
+        const result = await mermaid.render(renderId, raw);
+        if (!mounted) return;
+        setSvg(result.svg);
+        setHasError(false);
+      } catch (error) {
+        console.error('Failed to render diagram block:', error);
+        if (!mounted) return;
+        setSvg('');
+        setHasError(true);
+      }
+    };
+
+    void renderDiagram();
+
+    return () => {
+      mounted = false;
+    };
+  }, [raw, renderId]);
+
+  if (!hasError && svg) {
+    return (
+      <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 overflow-x-auto">
+        <div dangerouslySetInnerHTML={{ __html: svg }} />
+      </div>
+    );
+  }
+
+  return (
+    <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
+      {raw}
+    </pre>
+  );
+};
+
+const parseCanvasBlock = (raw: string): CanvasBlock => {
+  try {
+    const parsed = JSON.parse(raw) as { title?: string; content?: string };
+    return {
+      title: parsed?.title || 'Digital note',
+      content: String(parsed?.content || '').trim(),
+    };
+  } catch {
+    return {
+      title: 'Digital note',
+      content: raw.trim(),
+    };
+  }
+};
+
+const CanvasBlockView = ({ raw }: { raw: string }) => {
+  const parsed = useMemo(() => parseCanvasBlock(raw), [raw]);
+  const [draft, setDraft] = useState(parsed.content);
+
+  return (
+    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 overflow-hidden">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
+        {parsed.title || 'Digital note'}
+      </p>
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        rows={10}
+        data-canvas-editor="true"
+        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)] outline-none focus:border-[var(--muted-strong)]"
+      />
+      <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+        <p className="mb-2 text-[10px] uppercase tracking-widest text-[var(--muted)]">Preview</p>
+        <MarkdownBody content={draft} />
+      </div>
+    </div>
+  );
+};
+
 interface RichMarkdownProps {
   content: string;
   enableTabs?: boolean;
@@ -350,12 +437,12 @@ export default function RichMarkdown({ content, enableTabs = true, enableSlider 
             return <GameBlockView raw={raw} />;
           }
 
-          if (!isInline && language === 'diagram') {
-            return (
-              <pre className="my-3 whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--foreground)]">
-                {raw}
-              </pre>
-            );
+          if (!isInline && (language === 'diagram' || language === 'mermaid')) {
+            return <DiagramBlockView raw={raw} />;
+          }
+
+          if (!isInline && language === 'canvas') {
+            return <CanvasBlockView raw={raw} />;
           }
 
           if (!isInline && (language === 'json-chart' || language === 'chart')) {

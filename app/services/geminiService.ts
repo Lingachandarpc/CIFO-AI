@@ -13,6 +13,118 @@ interface SearchResult {
   content: string;
 }
 
+interface GeminiAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  base64?: string;
+  tool?: string;
+}
+
+type GeminiPart = {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+};
+
+const SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/json',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
+const MAX_GEMINI_ATTACHMENTS = 4;
+
+function inferMimeTypeFromFileName(fileName?: string): string | null {
+  if (!fileName) return null;
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.txt')) return 'text/plain';
+  if (lower.endsWith('.csv')) return 'text/csv';
+  if (lower.endsWith('.json')) return 'application/json';
+  if (lower.endsWith('.doc')) return 'application/msword';
+  if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
+  if (lower.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return null;
+}
+
+function normalizeAttachmentMimeType(attachment: GeminiAttachment): string {
+  const fromType = (attachment.type || '').trim().toLowerCase();
+  if (fromType) return fromType;
+  return inferMimeTypeFromFileName(attachment.name) || 'application/octet-stream';
+}
+
+function isSupportedGeminiAttachmentMimeType(mimeType: string): boolean {
+  if (!mimeType) return false;
+  if (mimeType.startsWith('image/')) return true;
+  return SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType);
+}
+
+function buildGeminiAttachmentParts(attachments: GeminiAttachment[] = []): {
+  parts: GeminiPart[];
+  summary: string;
+} {
+  if (!attachments.length) return { parts: [], summary: '' };
+
+  const parts: GeminiPart[] = [];
+  const acceptedNames: string[] = [];
+  const skippedNames: string[] = [];
+
+  for (const attachment of attachments.slice(0, MAX_GEMINI_ATTACHMENTS)) {
+    if (!attachment?.base64) {
+      skippedNames.push(attachment?.name || 'unnamed-file');
+      continue;
+    }
+
+    const mimeType = normalizeAttachmentMimeType(attachment);
+    if (!isSupportedGeminiAttachmentMimeType(mimeType)) {
+      skippedNames.push(attachment.name || 'unnamed-file');
+      continue;
+    }
+
+    acceptedNames.push(attachment.name || 'unnamed-file');
+    parts.push({
+      text: `Attachment: ${attachment.name || 'unnamed-file'} (${mimeType}). Use this file content as primary evidence when answering the user query.`,
+    });
+    parts.push({
+      inlineData: {
+        mimeType,
+        data: attachment.base64,
+      },
+    });
+  }
+
+  if (attachments.length > MAX_GEMINI_ATTACHMENTS) {
+    skippedNames.push(`${attachments.length - MAX_GEMINI_ATTACHMENTS} additional file(s) not sent (attachment limit ${MAX_GEMINI_ATTACHMENTS}).`);
+  }
+
+  const summarySegments: string[] = [];
+  if (acceptedNames.length > 0) {
+    summarySegments.push(`Attached files included: ${acceptedNames.join(', ')}`);
+  }
+  if (skippedNames.length > 0) {
+    summarySegments.push(`Skipped attachments: ${skippedNames.join(', ')}`);
+  }
+
+  return {
+    parts,
+    summary: summarySegments.join('\n'),
+  };
+}
+
 /**
  * Fetch real-time web search results from Tavily
  */
@@ -126,6 +238,7 @@ export async function generateNarrativeWithWebSearch(
       bio?: string;
     };
     recentQueries?: string[];
+    attachments?: GeminiAttachment[];
   },
   prefetchedWebResults?: SearchResult[], // NEW: Allow middleware to pass pre-fetched results
   selectedModel?: string
@@ -162,6 +275,7 @@ export async function generateNarrativeWithWebSearch(
       'Realistic': 'Tell the story in a realistic, factual, and grounded manner with real-world examples.',
       'Dramatic': 'Tell the story with dramatic flair, engaging tension, and emotional depth.',
       'Educational': 'Tell the story in an educational style, focusing on learning outcomes and key insights. In READ mode, use advanced formatting (tables/charts/tabs/progress/diagrams) only when it genuinely improves understanding.',
+      'Personalized': 'Tailor the response to the user profile context (age, interests, personality pulse, bio, location) while staying factual and helpful.',
     };
 
     const styleInstruction = narrativeStyleGuide[narrationType] || narrativeStyleGuide['Realistic'];
@@ -223,12 +337,17 @@ export async function generateNarrativeWithWebSearch(
 
     const helpfulnessGuideline = '\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:\n1. NEVER EVER say "I don\'t have access to real-time data" or "I can\'t check the information" or "Check a news website"\n2. When you see **Current Time**: [time] in the context below, ONLY use it if the user explicitly asked about time or mentioned specific times\n3. Greeting rule: if you greet, use exactly "Hi {name}" and only once per ongoing session/topic. Never include location/city in the greeting.\n4. When you see web search results below, PRIORITIZE information from trusted local news sources (BBC, Reuters, AP News, country-specific outlets)\n5. For location-specific queries (movies, news, events): First verify the location context, then provide location-relevant information. Do NOT mention the time unless user asked about it\n6. For time questions: State the EXACT time shown in **Current Time**: field. Example: "It\'s currently 11:10 PM IST."\n7. For time-contextual questions ("is it good time for coffee?"): First state the current time from **Current Time**: field, then give recommendation\n8. For news/current events: Use web search data from trusted sources and prioritize region-specific outlets over general ones. Do NOT include time greetings\n9. ALWAYS be solution-oriented and helpful - provide actual answers with sources, not excuses\n10. Location Context: If user is in specific region (India, USA, Tamil Nadu), validate that results are relevant to that location. If results are global/irrelevant, state ONLY verified local information\n11. REALISTIC STYLE LANGUAGE: For Realistic narrations, NEVER use opening phrases like "Picture this:", "Imagine this:", "Think of it this way:", "Let me paint a picture:", "Envision:", or "Let\'s say:". Instead, get directly to the point with factual, straightforward language.\n\nTypical schedules for context: coffee good in morning (6am-11am), lunch around noon-2pm, dinner 6pm-9pm, sleep 9pm-6am';
 
+    const attachmentPayload = buildGeminiAttachmentParts(userContext?.attachments || []);
+    const attachmentContextText = attachmentPayload.summary
+      ? `\n\nAttachment context:\n${attachmentPayload.summary}\n\nIf attachments are provided, prioritize information found in those files over assumptions.`
+      : '';
+
     const listenModeInstructions = interactionMode === 'listen'
       ? `
 Answer the user's question directly:
 "${finalQuery}"
 
-Language: ${language}${clarificationContext}${helpfulnessGuideline}
+Language: ${language}${clarificationContext}${helpfulnessGuideline}${attachmentContextText}
 ${contextStr ? `Context: ${contextStr}` : ''}
 
 Reply in a conversational chat style that answers the user's question directly.
@@ -240,6 +359,7 @@ Rules:
 - For Realistic style: 2-5 sentences maximum. Be concise but complete. Prioritize web search data.
 - For Dramatic style: 2-5 engaging sentences with emotional depth.
 - For Educational style: 3-6 clear sentences focusing on key learning points.
+- For Personalized style: 3-7 sentences tailored to known user profile fields (interests, pulse, bio, age, location).
 - Keep it crisp and conversational, suitable for audio narration.
 - End with a complete closing sentence.
 ${enableWebSearch && searchContext ? '\nIMPORTANT: Prioritize the current web information provided below over your training data. Use this for accuracy:' : ''}
@@ -251,6 +371,7 @@ Answer this simple, direct question with a SHORT response (1-2 lines maximum):
 "${query}"
 
 Language: ${language}
+${attachmentContextText}
 ${contextStr ? `Context: ${contextStr}` : ''}
 
 Rules:
@@ -264,12 +385,13 @@ ${searchContext}
         : `
 Tell an engaging narration about:
 "${finalQuery}"
-${contextStr ? `\nContext: ${contextStr}` : ''}${clarificationContext}${helpfulnessGuideline}
+${contextStr ? `\nContext: ${contextStr}` : ''}${clarificationContext}${helpfulnessGuideline}${attachmentContextText}
 
 Instructions:
 - Narrative Style: ${narrationType}
 - Language: ${language}
 - ${styleInstruction}
+- If style is Personalized, naturally reference relevant user profile context where appropriate.
 ${narrationType === 'Realistic' ? '- Length: 2-15 lines. Be comprehensive but concise.' : `- Duration: approximately ${narrationTime} minutes`}
 - Keep the narration engaging, clear, and suitable for reading
 - Use minimal formatting: headings in **bold**, bullet lists where helpful
@@ -310,9 +432,14 @@ ${enableWebSearch && searchContext ? '\nYou have been provided with current web 
     }
 
     // Add current query
+    const currentUserParts: GeminiPart[] = [{ text: listenModeInstructions }];
+    if (attachmentPayload.parts.length > 0) {
+      currentUserParts.push(...attachmentPayload.parts);
+    }
+
     contents.push({
       role: 'user',
-      parts: [{ text: listenModeInstructions }]
+      parts: currentUserParts
     });
 
     const apiUrl = `${GEMINI_API_BASE}/${resolvedModel}:generateContent?key=${apiKey}`;

@@ -14,6 +14,11 @@
 
 import { Language, VoiceName, VoiceGender } from '../types';
 
+export type GeminiTtsAudioPayload = {
+  audio: string;
+  mimeType: string;
+};
+
 // ============================================================================
 // Voice ↔ Gender metadata
 // ============================================================================
@@ -113,7 +118,7 @@ export async function generateSpeechWithGemini(
   voiceType: string,
   language: Language,
   voiceGender: VoiceGender = VoiceGender.AUTO
-): Promise<string> {
+): Promise<GeminiTtsAudioPayload> {
   try {
     const voiceName = resolveGeminiVoice(voiceType, language, voiceGender);
 
@@ -136,13 +141,16 @@ export async function generateSpeechWithGemini(
         language,
         voiceGender,
       });
-      return '';
+      return { audio: '', mimeType: 'audio/wav' };
     }
 
     const data = await res.json();
-    return data.audio || '';
+    return {
+      audio: data.audio || '',
+      mimeType: data.mimeType || 'audio/wav',
+    };
   } catch (error) {
     console.error('Error generating speech with Gemini TTS:', error);
-    return '';
+    return { audio: '', mimeType: 'audio/wav' };
   }
 }

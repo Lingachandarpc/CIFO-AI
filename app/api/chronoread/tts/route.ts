@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     const arrayBuffer = await res.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString('base64');
 
-    return NextResponse.json({ audio: base64 });
+    return NextResponse.json({ audio: base64, mimeType: 'audio/mpeg' });
   } catch (err) {
     console.error('TTS route error:', err);
     return NextResponse.json({ error: 'TTS generation failed' }, { status: 500 });

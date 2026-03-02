@@ -32,6 +32,14 @@ export interface UserMindContext {
     timestamp: Date;
     engagement: number;
   }>;
+  attachments?: Array<{
+    id: string;
+    name: string;
+    size: number;
+    type: string;
+    base64?: string;
+    tool?: string;
+  }>;
 }
 
 export interface SearchResult {

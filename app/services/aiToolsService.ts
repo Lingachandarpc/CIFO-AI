@@ -4,8 +4,10 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
+import { JWT, OAuth2Client } from 'google-auth-library';
 import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
 import * as XLSX from 'xlsx';
+import { existsSync, readFileSync } from 'fs';
 
 export type AIToolType = 'image' | 'video' | 'ocr' | 'document' | 'dashboard';
 
@@ -904,81 +906,254 @@ export async function generateVideo(prompt: string, options?: {
 }
 
 // ============================================================================
-// OCR SERVICE (Tesseract / PaddleOCR)
+// OCR SERVICE (Google Cloud Vision API)
 // ============================================================================
 export async function performOCR(imageData: Buffer | string, options?: {
-  language?: string; // 'eng', 'fra', 'deu', etc.
-  fast?: boolean; // use fast mode (PaddleOCR)
+  language?: string; // supports ISO-639/BCP-47 hints
+  fast?: boolean;
+  mimeType?: string;
+  fileName?: string;
 }): Promise<AIToolResponse> {
   const startTime = Date.now();
 
   try {
-    // Option 1: Cloud-based OCR (if available)
-    const googleCloudKey = process.env.GOOGLE_CLOUD_KEY;
+    type GoogleServiceAccount = {
+      client_email?: string;
+      private_key?: string;
+    };
 
-    if (googleCloudKey) {
-      const base64Image = typeof imageData === 'string' ? imageData : imageData.toString('base64');
+    const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
-      const response = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + process.env.GOOGLE_API_KEY, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: base64Image },
-              features: [{ type: 'TEXT_DETECTION' }, { type: 'DOCUMENT_TEXT_DETECTION' }],
-            },
-          ],
-        }),
-      });
+    const parseServiceAccountFromRaw = (raw: string): GoogleServiceAccount | null => {
+      const normalizedRaw = raw.trim();
+      if (!normalizedRaw) return null;
 
-      if (response.ok) {
-        const data = await response.json();
-        const textAnnotations = data.responses[0]?.textAnnotations || [];
-        const fullText = textAnnotations[0]?.description || '';
-        const details = textAnnotations.slice(1).map((annotation: any) => ({
-          text: annotation.description,
-          confidence: annotation.confidence,
-          bounds: annotation.boundingPoly,
-        }));
+      const parseJsonText = (jsonText: string): GoogleServiceAccount | null => {
+        try {
+          const parsed = JSON.parse(jsonText) as GoogleServiceAccount;
+          if (parsed?.private_key) {
+            parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+          }
+          return parsed;
+        } catch {
+          return null;
+        }
+      };
 
-        return {
-          success: true,
-          data: {
-            fullText,
-            details,
-            language: options?.language || 'eng',
-          },
-          type: 'ocr',
-          processingTime: Date.now() - startTime,
-          provider: 'google-vision',
-        };
+      if (normalizedRaw.startsWith('{') && normalizedRaw.endsWith('}')) {
+        return parseJsonText(normalizedRaw);
       }
-    }
 
-    // Option 2: AWS Textract
-    const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID;
-    if (awsAccessKeyId) {
-      // Would use @aws-sdk/client-textract
+      try {
+        const decoded = Buffer.from(normalizedRaw, 'base64').toString('utf8').trim();
+        if (decoded.startsWith('{') && decoded.endsWith('}')) {
+          return parseJsonText(decoded);
+        }
+      } catch {
+      }
+
+      if (normalizedRaw.endsWith('.json') && existsSync(normalizedRaw)) {
+        try {
+          const content = readFileSync(normalizedRaw, 'utf8');
+          return parseJsonText(content);
+        } catch {
+          return null;
+        }
+      }
+
+      return null;
+    };
+
+    const getServiceAccountFromVisionEnv = (): GoogleServiceAccount | null => {
+      const credentialCandidates = [
+        process.env.GOOGLE_TTS_SERVICE_ACCOUNT_JSON,
+        process.env.GOOGLE_VISION_SERVICE_ACCOUNT_JSON,
+        process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+        process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      ].filter((value): value is string => Boolean(value && value.trim()));
+
+      for (const configured of credentialCandidates) {
+        const parsed = parseServiceAccountFromRaw(configured);
+        if (parsed?.client_email && parsed.private_key) {
+          return parsed;
+        }
+      }
+
+      return null;
+    };
+
+    const getVisionAccessToken = async (): Promise<string | null> => {
+      const serviceAccount = getServiceAccountFromVisionEnv();
+      if (serviceAccount?.client_email && serviceAccount.private_key) {
+        try {
+          const client = new JWT({
+            email: serviceAccount.client_email,
+            key: serviceAccount.private_key,
+            scopes: [GOOGLE_SCOPE],
+          });
+
+          const token = await client.getAccessToken();
+          return typeof token === 'string' ? token : token?.token || null;
+        } catch {
+        }
+      }
+
+      const googleClientId = process.env.GOOGLE_CLIENT_ID;
+      const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      const googleRefreshToken = process.env.GOOGLE_REFRESH_TOKEN || process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+      if (!googleClientId || !googleClientSecret || !googleRefreshToken) {
+        return null;
+      }
+
+      try {
+        const oauthClient = new OAuth2Client(googleClientId, googleClientSecret);
+        oauthClient.setCredentials({ refresh_token: googleRefreshToken });
+        const tokenResult = await oauthClient.getAccessToken();
+        return typeof tokenResult === 'string' ? tokenResult : tokenResult?.token || null;
+      } catch {
+        return null;
+      }
+    };
+
+    const accessToken = await getVisionAccessToken();
+    if (!accessToken) {
       return {
         success: false,
-        error: 'AWS Textract integration requires AWS SDK setup',
+        error: 'Google Vision credentials are missing. Set GOOGLE_VISION_SERVICE_ACCOUNT_JSON (or GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_TTS_SERVICE_ACCOUNT_JSON / GOOGLE_APPLICATION_CREDENTIALS) or OAuth env vars (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN).',
         type: 'ocr',
         processingTime: Date.now() - startTime,
+        provider: 'google-vision',
       };
     }
 
-    // Fallback response
+    const base64Image = (typeof imageData === 'string' ? imageData : imageData.toString('base64'))
+      .replace(/^data:[^;]+;base64,/i, '')
+      .trim();
+
+    const languageMap: Record<string, string> = {
+      eng: 'en',
+      fra: 'fr',
+      fre: 'fr',
+      deu: 'de',
+      ger: 'de',
+      spa: 'es',
+      por: 'pt',
+      hin: 'hi',
+      tam: 'ta',
+      tel: 'te',
+      mal: 'ml',
+      kan: 'kn',
+      ben: 'bn',
+      mar: 'mr',
+      guj: 'gu',
+      pan: 'pa',
+      jpn: 'ja',
+      zho: 'zh',
+      chi: 'zh',
+    };
+    const normalizedLanguage = options?.language
+      ? (languageMap[options.language.toLowerCase()] || options.language)
+      : undefined;
+
+    const mimeType = String(options?.mimeType || '').toLowerCase();
+    const shouldUseFilesAnnotate =
+      mimeType.includes('pdf') ||
+      mimeType.includes('tiff') ||
+      mimeType.includes('gif');
+
+    const featureType = options?.fast ? 'TEXT_DETECTION' : 'DOCUMENT_TEXT_DETECTION';
+
+    const endpoint = shouldUseFilesAnnotate
+      ? 'https://vision.googleapis.com/v1/files:annotate'
+      : 'https://vision.googleapis.com/v1/images:annotate';
+
+    const requestBody = shouldUseFilesAnnotate
+      ? {
+          requests: [
+            {
+              inputConfig: {
+                content: base64Image,
+                mimeType: mimeType || 'application/pdf',
+              },
+              features: [{ type: featureType }],
+              ...(normalizedLanguage
+                ? {
+                    imageContext: {
+                      languageHints: [normalizedLanguage],
+                    },
+                  }
+                : {}),
+            },
+          ],
+        }
+      : {
+          requests: [
+            {
+              image: { content: base64Image },
+              features: [{ type: featureType }],
+              ...(normalizedLanguage
+                ? {
+                    imageContext: {
+                      languageHints: [normalizedLanguage],
+                    },
+                  }
+                : {}),
+            },
+          ],
+        };
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      return {
+        success: false,
+        error: `Google Vision OCR failed (${response.status}). ${errorBody || 'No response body.'}`,
+        type: 'ocr',
+        processingTime: Date.now() - startTime,
+        provider: 'google-vision',
+      };
+    }
+
+    const data = await response.json();
+    const firstResponse = shouldUseFilesAnnotate
+      ? data?.responses?.[0]?.responses?.[0] || {}
+      : data?.responses?.[0] || {};
+    const responseError = firstResponse?.error;
+    if (responseError?.message) {
+      return {
+        success: false,
+        error: `Google Vision OCR error: ${responseError.message}`,
+        type: 'ocr',
+        processingTime: Date.now() - startTime,
+        provider: 'google-vision',
+      };
+    }
+
+    const fullText = firstResponse?.fullTextAnnotation?.text || firstResponse?.textAnnotations?.[0]?.description || '';
+    const pages = firstResponse?.fullTextAnnotation?.pages || [];
+    const details = pages.map((page: any, pageIndex: number) => ({
+      page: pageIndex + 1,
+      confidence: page?.confidence,
+    }));
+
     return {
       success: true,
       data: {
-        fullText: 'OCR processing requires cloud service configuration',
-        details: [],
-        language: options?.language || 'eng',
+        fullText,
+        details,
+        language: normalizedLanguage || options?.language || 'en',
       },
       type: 'ocr',
       processingTime: Date.now() - startTime,
-      provider: 'fallback',
+      provider: 'google-vision',
     };
   } catch (error: any) {
     return {
@@ -1019,7 +1194,16 @@ export async function generateDocument(content: string, format: 'pdf' | 'docx' |
       };
     }
 
-    const reportTitle = options?.title || 'Research Report';
+    const normalizeReportTitle = (value?: string) => {
+      const cleaned = String(value || '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!cleaned) return 'Research Report';
+      return cleaned.slice(0, 120);
+    };
+
+    const reportTitle = normalizeReportTitle(options?.title || 'Research Report');
     const fileName = options?.fileName || `${reportTitle.toLowerCase().replace(/[^a-z0-9]+/gi, '-')}.${format === 'markdown' ? 'md' : format}`;
 
     const lines = normalized.split('\n').map((line) => line.trim());
@@ -1210,7 +1394,17 @@ export async function generateDocument(content: string, format: 'pdf' | 'docx' |
       const skipIndexes = markdownTable?.consumed || new Set<number>();
 
       const pdfLines: PdfLine[] = [];
-      pdfLines.push({ segments: [{ text: title, font: 'F2' }], size: 22, gap: 30, x: margin });
+      const titleSegments = parseBoldSegments(title, 'F2');
+      const wrappedTitleSegments = splitSegmentsByWidth(titleSegments, 56);
+      wrappedTitleSegments.forEach((segmentRow, index) => {
+        const mergedText = segmentRow.map((segment) => segment.text).join('');
+        pdfLines.push({
+          segments: [{ text: mergedText, font: 'F2' }],
+          size: 22,
+          gap: index === wrappedTitleSegments.length - 1 ? 30 : 24,
+          x: margin,
+        });
+      });
       pdfLines.push({ segments: [{ text: `Generated: ${new Date().toLocaleString()}`, font: 'F1' }], size: 10, gap: 14, x: margin });
       if (author) {
         pdfLines.push({ segments: [{ text: `Author: ${author}`, font: 'F1' }], size: 10, gap: 14, x: margin });
@@ -1647,6 +1841,8 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
       .trim()
       .replace(/\b\w/g, (char) => char.toUpperCase());
 
+    const escapeRegExp = (value: string): string => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
     const extractRowsFromCsv = (csvText: string): string[][] => {
       return csvText
         .split(/\r?\n/)
@@ -1654,7 +1850,7 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
         .filter((row) => row.some((cell) => cell.length > 0));
     };
 
-    const parsedTables: string[][][] = [];
+    const parsedTables: Array<{ sourceName: string; rows: string[][] }> = [];
     (attachments || []).forEach((attachment) => {
       if (!attachment.data) return;
       const isCsv = /csv|text\/plain|application\/vnd\.ms-excel/i.test(attachment.type) || /\.csv$/i.test(attachment.name);
@@ -1670,23 +1866,106 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
           const normalizedRows = sheetRows
             .map((row) => row.map((cell) => String(cell ?? '').trim()))
             .filter((row) => row.some((cell) => cell.length > 0));
-          if (normalizedRows.length > 0) parsedTables.push(normalizedRows.slice(0, 101));
+          if (normalizedRows.length > 0) {
+            parsedTables.push({
+              sourceName: attachment.name || `Attachment ${parsedTables.length + 1}`,
+              rows: normalizedRows.slice(0, 1501),
+            });
+          }
           return;
         }
 
         if (isCsv) {
           const decoded = Buffer.from(attachment.data, 'base64').toString('utf-8');
           const rows = extractRowsFromCsv(decoded);
-          if (rows.length > 0) parsedTables.push(rows.slice(0, 101));
+          if (rows.length > 0) {
+            parsedTables.push({
+              sourceName: attachment.name || `Attachment ${parsedTables.length + 1}`,
+              rows: rows.slice(0, 1501),
+            });
+          }
         }
       } catch {
       }
     });
 
-    const primaryTable = parsedTables[0] || [['Metric', 'Value'], ['Data points', '0'], ['Note', 'Upload CSV or Excel for richer dashboard']];
-    const rawHeaders = (primaryTable[0] || ['Metric', 'Value']).map((header) => String(header || '').trim() || 'Column');
-    const headers = rawHeaders.map((header, index) => header || `Column ${index + 1}`);
-    const rows = primaryTable.slice(1, 401).map((row) => headers.map((_, index) => String(row[index] || '').trim()));
+    const buildUnifiedDataset = () => {
+      if (!parsedTables.length) {
+        return {
+          headers: ['Metric', 'Value'],
+          rows: [['Data points', '0'], ['Note', 'Upload CSV or Excel for richer dashboard']],
+        };
+      }
+
+      if (parsedTables.length === 1) {
+        const single = parsedTables[0].rows;
+        const singleHeaders = (single[0] || ['Metric', 'Value']).map((header, index) => {
+          const resolved = String(header || '').trim();
+          return resolved || `Column ${index + 1}`;
+        });
+        const singleRows = single
+          .slice(1, 5001)
+          .map((row) => singleHeaders.map((_, index) => String(row[index] || '').trim()));
+        return {
+          headers: singleHeaders,
+          rows: singleRows,
+        };
+      }
+
+      const unionHeaders = new Set<string>();
+      parsedTables.forEach((table) => {
+        const tableHeaders = (table.rows[0] || []).map((header, index) => {
+          const resolved = String(header || '').trim();
+          return resolved || `Column ${index + 1}`;
+        });
+        tableHeaders.forEach((header) => unionHeaders.add(header));
+      });
+
+      const combinedHeaders = ['Source File', ...Array.from(unionHeaders)];
+      const combinedRows: string[][] = [];
+
+      for (const table of parsedTables) {
+        const tableHeaders = (table.rows[0] || []).map((header, index) => {
+          const resolved = String(header || '').trim();
+          return resolved || `Column ${index + 1}`;
+        });
+
+        const indexByHeader = new Map<string, number>();
+        tableHeaders.forEach((header, index) => {
+          indexByHeader.set(header, index);
+        });
+
+        for (const row of table.rows.slice(1)) {
+          const normalizedRow = combinedHeaders.map((header) => {
+            if (header === 'Source File') return table.sourceName;
+            const cellIndex = indexByHeader.get(header);
+            if (cellIndex === undefined) return '';
+            return String(row[cellIndex] || '').trim();
+          });
+          combinedRows.push(normalizedRow);
+          if (combinedRows.length >= 5000) break;
+        }
+
+        if (combinedRows.length >= 5000) break;
+      }
+
+      return {
+        headers: combinedHeaders,
+        rows: combinedRows.length
+          ? combinedRows
+          : [['Multiple files detected', 'No readable rows extracted']].map((row) => {
+              const normalized = new Array(combinedHeaders.length).fill('');
+              normalized[0] = 'System';
+              normalized[1] = row[0];
+              if (combinedHeaders.length > 2) normalized[2] = row[1];
+              return normalized;
+            }),
+      };
+    };
+
+    const unifiedDataset = buildUnifiedDataset();
+    const headers = unifiedDataset.headers.map((header, index) => String(header || '').trim() || `Column ${index + 1}`);
+    const rows = unifiedDataset.rows.slice(0, 5000).map((row) => headers.map((_, index) => String(row[index] || '').trim()));
 
     const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const normalizedHeaders = headers.map((header) => normalizeKey(header));
@@ -1710,31 +1989,78 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
       return Number.isFinite(num) ? num : null;
     };
 
+    const isIdentifierHeader = (header: string) => {
+      const normalized = String(header || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      if (!normalized) return false;
+      return /(^|\s)(id|ids|row id|record id|identifier|index|serial|serial no|s no|sr no|sno)(\s|$)/i.test(normalized);
+    };
+
+    const isTemporalHeader = (header: string) => {
+      const normalized = String(header || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      if (!normalized) return false;
+      return /(^|\s)(date|day|week|month|quarter|year|time|timestamp|fy|fiscal year|period)(\s|$)/i.test(normalized);
+    };
+
+    const isBusinessMetricHeader = (header: string) => {
+      const normalized = String(header || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      if (!normalized) return false;
+      return /(^|\s)(sales|revenue|amount|total|price|cost|profit|value|score|quantity|qty|unit|units|volume|gmv|income|expense|margin)(\s|$)/i.test(normalized);
+    };
+
+    const getNumericCoverage = (index: number) => rows.reduce((count, row) => count + (parseNumeric(row[index] || '') !== null ? 1 : 0), 0);
+
+    const numericThreshold = Math.max(3, Math.floor(rows.length * 0.35));
+
     let metricColumnIndex = -1;
-    for (let col = 0; col < headers.length; col += 1) {
-      const numericCount = rows.reduce((count, row) => count + (parseNumeric(row[col] || '') !== null ? 1 : 0), 0);
-      if (numericCount >= Math.max(3, Math.floor(rows.length * 0.35))) {
-        metricColumnIndex = col;
-        break;
+
+    const headerMentionedInPrompt = (header: string) => userRequest.toLowerCase().includes(header.toLowerCase());
+    const hintedBusinessMetric = headers.findIndex((header, index) => {
+      if (isIdentifierHeader(header) || isTemporalHeader(header)) return false;
+      if (!headerMentionedInPrompt(header) || !isBusinessMetricHeader(header)) return false;
+      return getNumericCoverage(index) >= numericThreshold;
+    });
+    if (hintedBusinessMetric >= 0) metricColumnIndex = hintedBusinessMetric;
+
+    if (metricColumnIndex === -1) {
+      const firstBusinessMetric = headers.findIndex((header, index) => {
+        if (isIdentifierHeader(header) || isTemporalHeader(header)) return false;
+        if (!isBusinessMetricHeader(header)) return false;
+        return getNumericCoverage(index) >= numericThreshold;
+      });
+      if (firstBusinessMetric >= 0) metricColumnIndex = firstBusinessMetric;
+    }
+
+    if (metricColumnIndex === -1) {
+      for (let col = 0; col < headers.length; col += 1) {
+        if (isIdentifierHeader(headers[col] || '') || isTemporalHeader(headers[col] || '')) continue;
+        const numericCount = getNumericCoverage(col);
+        if (numericCount >= numericThreshold) {
+          metricColumnIndex = col;
+          break;
+        }
       }
     }
 
-    const headerMentionedInPrompt = (header: string) => userRequest.toLowerCase().includes(header.toLowerCase());
     if (metricColumnIndex === -1) {
-      const hintedMetric = headers.findIndex((header) => headerMentionedInPrompt(header) && /(sales|revenue|amount|total|count|price|cost|value|rating|score|profit)/i.test(header));
-      if (hintedMetric >= 0) metricColumnIndex = hintedMetric;
+      for (let col = 0; col < headers.length; col += 1) {
+        if (isIdentifierHeader(headers[col] || '')) continue;
+        const numericCount = getNumericCoverage(col);
+        if (numericCount >= numericThreshold) {
+          metricColumnIndex = col;
+          break;
+        }
+      }
+    }
+
+    if (metricColumnIndex >= 0 && isIdentifierHeader(headers[metricColumnIndex] || '')) {
+      metricColumnIndex = -1;
+    }
+
+    if (metricColumnIndex >= 0 && isTemporalHeader(headers[metricColumnIndex] || '')) {
+      metricColumnIndex = -1;
     }
 
     const labelColumnIndex = metricColumnIndex === 0 && headers.length > 1 ? 1 : 0;
-    const chartData = metricColumnIndex >= 0
-      ? rows
-        .map((row, index) => ({
-          label: String(row[labelColumnIndex] || `Item ${index + 1}`).slice(0, 16),
-          value: parseNumeric(row[metricColumnIndex] || ''),
-        }))
-        .filter((entry) => entry.value !== null)
-        .slice(0, 10) as Array<{ label: string; value: number }>
-      : [];
 
     const inferTitle = (): string => {
       const explicitTitle = options?.title && !/^ai dashboard$/i.test(options.title) ? options.title : '';
@@ -1761,10 +2087,45 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
 
     const sortByMatch = userRequest.match(/\bsort(?:ed)?\s+by\s+([a-z0-9_\- ]{2,60})/i);
     const groupByMatch = userRequest.match(/\bgroup(?:ed)?\s+by\s+([a-z0-9_\- ]{2,60})/i);
+    const perByMatch = userRequest.match(/\bper\s+([a-z0-9_\- ]{2,60})/i);
 
     const sortByColumnIndex = findHeaderIndexFromPhrase(sortByMatch?.[1] || null);
-    const groupByColumnIndex = findHeaderIndexFromPhrase(groupByMatch?.[1] || null);
+    const groupByColumnIndex = findHeaderIndexFromPhrase(groupByMatch?.[1] || perByMatch?.[1] || null);
     const sortDirection: 'asc' | 'desc' = /\b(desc|descending|highest|largest|top)\b/i.test(userRequest) ? 'desc' : 'asc';
+
+    const pageSizeMatch = userRequest.match(/\b(?:page\s*size|rows\s*per\s*page|show\s*)(\d{1,3})\b/i);
+    const requestedPageSize = pageSizeMatch ? Math.max(10, Math.min(200, Number(pageSizeMatch[1] || 25))) : 25;
+    const compactTable = /\b(compact|dense)\b/i.test(userRequest);
+    const stripedTable = !/\b(no\s+stripe|without\s+stripes?|plain\s+rows?)\b/i.test(userRequest);
+    const freezeFirstColumn = /\b(freeze|pin|sticky)\s+(first\s+)?column\b/i.test(userRequest);
+    const agGridEnablePivot = /\b(pivot|cross[\s-]?tab)\b/i.test(userRequest);
+    const agGridShowRowGroupPanel = /\b(group\s*panel|row\s*group\s*panel|grouping\s*panel)\b/i.test(userRequest) || groupByColumnIndex >= 0;
+    const agGridFitColumns = /\b(fit\s+columns?|auto[\s-]?fit|size\s+to\s+fit|full\s*width\s*columns?)\b/i.test(userRequest);
+    const agGridAutoSizeColumns = /\b(auto[\s-]?size\s*columns?|fit\s+content|content\s+width)\b/i.test(userRequest);
+    const agGridShowStatusBar = /\b(status\s*bar|statusbar|aggregate|aggregation|sum|average|avg|min|max)\b/i.test(userRequest);
+    const agGridWrapText = /\b(wrap|multi[\s-]?line)\b/i.test(userRequest);
+    const agGridLockColumns = /\b(lock\s+columns?|fixed\s+columns?)\b/i.test(userRequest);
+
+    const visibleColumns = headers.map(() => true);
+    headers.forEach((header, index) => {
+      const escaped = escapeRegExp(header);
+      if (new RegExp(`\\b(hide|exclude|remove)\\s+(the\\s+)?${escaped}\\b`, 'i').test(userRequest)) {
+        visibleColumns[index] = false;
+      }
+    });
+
+    if (/\b(show only|only show|include only)\b/i.test(userRequest)) {
+      const mentioned = headers.map((header) => headerMentionedInPrompt(header));
+      if (mentioned.some(Boolean)) {
+        mentioned.forEach((isMentioned, index) => {
+          visibleColumns[index] = isMentioned;
+        });
+      }
+    }
+
+    if (!visibleColumns.some(Boolean)) {
+      visibleColumns.fill(true);
+    }
 
     const wantsFilters = /\b(filter|filters|slicer|slice|dropdown|segment|by\s+)\b/i.test(userRequest);
     const wantsTable = !/\b(no table|without table|hide table)\b/i.test(userRequest);
@@ -1797,14 +2158,60 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     const filterColumnIndexes = (preferredFilterColumns.length ? preferredFilterColumns : categoricalColumns.slice(0, 3).map((item) => item.index));
     const showFilters = wantsFilters || filterColumnIndexes.length > 0;
 
-    const safeHeaders = headers.map((header) => escapeHtml(header));
-    const safeRows = rows.map((row) => row.map((cell) => escapeHtml(cell)));
-
     const kpiCount = rows.length;
     const sourceCount = (attachments || []).length;
-    const numericValues = metricColumnIndex >= 0 ? rows.map((row) => parseNumeric(row[metricColumnIndex] || '')).filter((value): value is number => value !== null) : [];
-    const avgMetric = numericValues.length ? (numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length) : null;
-    const maxValue = numericValues.length ? Math.max(...numericValues) : null;
+    const queryLower = userRequest.toLowerCase();
+    const hasTotalIntent = /\b(total|sum|overall|aggregate)\b/i.test(queryLower);
+    const hasAverageIntent = /\b(average|avg|mean)\b/i.test(queryLower);
+    const hasMedianIntent = /\bmedian\b/i.test(queryLower);
+    const hasCountIntent = /\bcount\b|\bnumber of\b/i.test(queryLower);
+    const hasComparisonIntent = /\b(compare|comparison|vs\b|versus|difference|variance|delta)\b/i.test(queryLower);
+    const hasGrowthIntent = /\b(growth|trend|change|increase|decrease)\b/i.test(queryLower);
+    const hasPerIntent = /\bper\s+[a-z0-9_\- ]{2,60}\b/i.test(queryLower);
+
+    const metricHeader = metricColumnIndex >= 0 ? headers[metricColumnIndex] : 'Metric';
+    const metricLabel = metricColumnIndex >= 0 && !isTemporalHeader(metricHeader) ? metricHeader : '';
+    const groupHeader = groupByColumnIndex >= 0 ? headers[groupByColumnIndex] : 'Group';
+
+    const primaryKpiMode = metricColumnIndex < 0
+      ? 'count'
+      : hasTotalIntent || hasPerIntent || groupByColumnIndex >= 0
+        ? 'sum'
+        : hasMedianIntent
+          ? 'median'
+          : hasCountIntent
+            ? 'count'
+            : hasAverageIntent
+              ? 'avg'
+              : 'avg';
+
+    const secondaryKpiMode = metricColumnIndex < 0
+      ? 'distinct'
+      : groupByColumnIndex >= 0
+        ? 'group-count'
+        : hasComparisonIntent
+          ? 'variance'
+          : hasGrowthIntent
+            ? 'range'
+            : 'median';
+
+    const primaryKpiLabel = primaryKpiMode === 'sum'
+      ? (metricLabel ? `Total ${metricLabel}` : 'Total')
+      : primaryKpiMode === 'median'
+        ? (metricLabel ? `Median ${metricLabel}` : 'Median')
+        : primaryKpiMode === 'count'
+          ? 'Count'
+          : (metricLabel ? `Average ${metricLabel}` : 'Average');
+
+    const secondaryKpiLabel = secondaryKpiMode === 'group-count'
+      ? `${groupHeader} groups`
+      : secondaryKpiMode === 'variance'
+        ? (metricLabel ? `Variance ${metricLabel}` : 'Variance')
+        : secondaryKpiMode === 'range'
+          ? (metricLabel ? `Range ${metricLabel}` : 'Range')
+          : secondaryKpiMode === 'distinct'
+            ? 'Distinct values'
+            : (metricLabel ? `Median ${metricLabel}` : 'Median');
 
     const headersJson = JSON.stringify(headers);
     const rowsJson = JSON.stringify(rows);
@@ -1813,6 +2220,132 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     const sortByColumnIndexJson = sortByColumnIndex;
     const groupByColumnIndexJson = groupByColumnIndex;
     const sortDirectionJson = JSON.stringify(sortDirection);
+    const visibleColumnsJson = JSON.stringify(visibleColumns);
+    const requestedPageSizeJson = requestedPageSize;
+    const compactTableJson = compactTable ? 'true' : 'false';
+    const stripedTableJson = stripedTable ? 'true' : 'false';
+    const freezeFirstColumnJson = freezeFirstColumn ? 'true' : 'false';
+    const agGridEnablePivotJson = agGridEnablePivot ? 'true' : 'false';
+    const agGridShowRowGroupPanelJson = agGridShowRowGroupPanel ? 'true' : 'false';
+    const agGridFitColumnsJson = agGridFitColumns ? 'true' : 'false';
+    const agGridAutoSizeColumnsJson = agGridAutoSizeColumns ? 'true' : 'false';
+    const agGridShowStatusBarJson = agGridShowStatusBar ? 'true' : 'false';
+    const agGridWrapTextJson = agGridWrapText ? 'true' : 'false';
+    const agGridLockColumnsJson = agGridLockColumns ? 'true' : 'false';
+    const primaryKpiModeJson = JSON.stringify(primaryKpiMode);
+    const secondaryKpiModeJson = JSON.stringify(secondaryKpiMode);
+    const primaryKpiLabelEscaped = escapeHtml(primaryKpiLabel);
+    const secondaryKpiLabelEscaped = escapeHtml(secondaryKpiLabel);
+
+    const requestedTheme = /\b(light|minimal|executive|glass|dark)\b/i.exec(userRequest)?.[1]?.toLowerCase() || 'dark';
+    const agGridThemeClass = requestedTheme === 'light' ? 'ag-theme-alpine' : 'ag-theme-alpine-dark';
+    const themeOverrides = requestedTheme === 'light'
+      ? `
+    body { background: #f4f7fb; color: #182033; }
+    .filter-card, .chart-panel, .table-panel, .card { background: #ffffff; border-color: #d8dfeb; }
+    .label, .filter-label, .panel-title, th { color: #4c5a78; }
+    .bar-track { background: #e9eef7; border-color: #d8dfeb; }
+    table { background: #ffffff; }
+    th, td { border-bottom-color: #e5eaf3; color: #1f2a44; }
+      `
+      : requestedTheme === 'minimal'
+        ? `
+    body { background: #0f1115; color: #e5e7eb; }
+    .filter-card, .chart-panel, .table-panel, .card { background: #171a21; border-color: #2a2f3a; }
+    .label, .filter-label, .panel-title, th { color: #9ca3af; }
+    .bar-track { background: #1f2430; border-color: #313846; }
+    .bar-fill { background: linear-gradient(90deg, #8b9bb4, #6f7f99); }
+      `
+        : requestedTheme === 'executive'
+          ? `
+    body { background: #090d1c; color: #ecf1ff; }
+    .filter-card, .chart-panel, .table-panel, .card { background: linear-gradient(180deg, #151d3a, #121934); border-color: #334375; }
+    .label, .filter-label, .panel-title, th { color: #aebdf1; }
+    .bar-fill { background: linear-gradient(90deg, #4f8cff, #6f5bff); }
+      `
+          : requestedTheme === 'glass'
+            ? `
+    body { background: radial-gradient(circle at 20% 20%, #1b2552, #0c1226); color: #edf2ff; }
+    .filter-card, .chart-panel, .table-panel, .card { background: rgba(22, 30, 62, 0.55); border-color: rgba(135, 152, 204, 0.35); backdrop-filter: blur(8px); }
+    .label, .filter-label, .panel-title, th { color: #b9c7f6; }
+    .bar-track { background: rgba(41, 56, 106, 0.5); border-color: rgba(135, 152, 204, 0.35); }
+      `
+            : '';
+
+    const agGridThemeOverrides = requestedTheme === 'light'
+      ? `
+    .ag-theme-alpine {
+      --ag-background-color: #ffffff;
+      --ag-foreground-color: #1f2a44;
+      --ag-header-background-color: #f2f6fd;
+      --ag-header-foreground-color: #4c5a78;
+      --ag-border-color: #d8dfeb;
+      --ag-row-border-color: #e5eaf3;
+      --ag-odd-row-background-color: #fafcff;
+      --ag-selected-row-background-color: rgba(88, 164, 255, 0.14);
+      --ag-alpine-active-color: #3d7bf4;
+    }
+    .ag-theme-alpine .ag-paging-panel,
+    .ag-theme-alpine .ag-status-bar {
+      border-top: 1px solid #d8dfeb;
+      color: #4c5a78;
+    }
+      `
+      : requestedTheme === 'minimal'
+        ? `
+    .ag-theme-alpine-dark {
+      --ag-background-color: #171a21;
+      --ag-foreground-color: #e5e7eb;
+      --ag-header-background-color: #1f2430;
+      --ag-header-foreground-color: #9ca3af;
+      --ag-border-color: #2a2f3a;
+      --ag-row-border-color: #2f3644;
+      --ag-odd-row-background-color: rgba(255,255,255,0.015);
+      --ag-selected-row-background-color: rgba(139,155,180,0.2);
+      --ag-alpine-active-color: #8b9bb4;
+    }
+        `
+        : requestedTheme === 'executive'
+          ? `
+    .ag-theme-alpine-dark {
+      --ag-background-color: #121934;
+      --ag-foreground-color: #ecf1ff;
+      --ag-header-background-color: #172246;
+      --ag-header-foreground-color: #aebdf1;
+      --ag-border-color: #334375;
+      --ag-row-border-color: #2d3e72;
+      --ag-odd-row-background-color: rgba(255,255,255,0.02);
+      --ag-selected-row-background-color: rgba(79,140,255,0.18);
+      --ag-alpine-active-color: #4f8cff;
+    }
+        `
+          : requestedTheme === 'glass'
+            ? `
+    .ag-theme-alpine-dark {
+      --ag-background-color: rgba(22, 30, 62, 0.55);
+      --ag-foreground-color: #edf2ff;
+      --ag-header-background-color: rgba(35, 49, 96, 0.7);
+      --ag-header-foreground-color: #b9c7f6;
+      --ag-border-color: rgba(135, 152, 204, 0.35);
+      --ag-row-border-color: rgba(135, 152, 204, 0.25);
+      --ag-odd-row-background-color: rgba(255,255,255,0.03);
+      --ag-selected-row-background-color: rgba(88,164,255,0.22);
+      --ag-alpine-active-color: #86b2ff;
+    }
+        `
+            : `
+    .ag-theme-alpine-dark {
+      --ag-background-color: #121933;
+      --ag-foreground-color: #e8ecf7;
+      --ag-header-background-color: #161f3f;
+      --ag-header-foreground-color: #a8b0d8;
+      --ag-border-color: #2b335c;
+      --ag-row-border-color: #24315d;
+      --ag-odd-row-background-color: rgba(255,255,255,0.02);
+      --ag-selected-row-background-color: rgba(88,164,255,0.16);
+      --ag-alpine-active-color: #58a4ff;
+    }
+            `;
 
     const html = `<!doctype html>
 <html lang="en">
@@ -1836,7 +2369,11 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     .value { font-size: 26px; font-weight: 700; margin-top: 8px; }
     .layout { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr); gap: 12px; }
     .chart-panel, .table-panel { background: #121933; border: 1px solid #293055; border-radius: 12px; padding: 14px; min-height: 260px; }
+    .table-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
     .panel-title { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #a8b0d8; }
+    .table-panel-head .panel-title { margin: 0; }
+    .table-fullscreen-toggle { border: 1px solid #313c6b; background: #0f1530; color: #b8c0e8; border-radius: 8px; padding: 6px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; }
+    .table-fullscreen-toggle:hover { color: #e8ecf7; border-color: #58a4ff; }
     .bar-row { display: grid; grid-template-columns: 110px 1fr 72px; gap: 8px; align-items: center; margin-bottom: 8px; }
     .bar-label, .bar-value { font-size: 12px; color: #d9e1ff; }
     .bar-track { width: 100%; height: 12px; border-radius: 999px; background: #1d2546; overflow: hidden; border: 1px solid #313c6b; }
@@ -1848,20 +2385,82 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     .pie-legend { display: flex; flex-direction: column; gap: 6px; }
     .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #d9e1ff; }
     .legend-color { width: 10px; height: 10px; border-radius: 2px; }
-    .table-wrap { width: 100%; max-width: 100%; overflow: auto; -webkit-overflow-scrolling: touch; }
-    table { width: 100%; border-collapse: collapse; background: #121933; min-width: 620px; }
-    th, td { border-bottom: 1px solid #293055; padding: 10px 12px; text-align: left; font-size: 13px; white-space: nowrap; }
-    th { color: #a8b0d8; text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; position: sticky; top: 0; background: #121933; }
-    tr:last-child td { border-bottom: none; }
+    .table-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .table-input, .table-select { border-radius: 8px; border: 1px solid #313c6b; background: #0f1530; color: #e8ecf7; padding: 7px 9px; font-size: 12px; }
+    .table-input { min-width: 190px; flex: 1; }
+    .table-action { border-radius: 8px; border: 1px solid #313c6b; background: #0f1530; color: #d8def8; padding: 7px 10px; font-size: 12px; cursor: pointer; }
+    .table-action:hover { border-color: #58a4ff; color: #ffffff; }
+    .table-wrap { width: 100%; max-width: 100%; overflow: hidden; border: 1px solid #293055; border-radius: 10px; }
+    #agGridRoot { width: 100%; height: min(62vh, 560px); }
+    .ag-theme-alpine, .ag-theme-alpine-dark {
+      --ag-font-family: Inter, Segoe UI, Arial, sans-serif;
+      --ag-font-size: 12px;
+      --ag-cell-horizontal-padding: 10px;
+      --ag-header-height: 38px;
+    }
+    .ag-theme-alpine.compact-grid, .ag-theme-alpine-dark.compact-grid {
+      --ag-font-size: 11px;
+      --ag-grid-size: 4px;
+      --ag-header-height: 32px;
+      --ag-row-height: 30px;
+    }
+    .ag-theme-alpine .ag-paging-panel,
+    .ag-theme-alpine .ag-status-bar,
+    .ag-theme-alpine-dark .ag-paging-panel,
+    .ag-theme-alpine-dark .ag-status-bar {
+      border-top: 1px solid var(--ag-border-color);
+      color: var(--ag-header-foreground-color);
+    }
+    .ag-theme-alpine .ag-cell.table-cell-selected,
+    .ag-theme-alpine-dark .ag-cell.table-cell-selected {
+      outline: 1.5px solid var(--ag-alpine-active-color);
+      outline-offset: -2px;
+      background: color-mix(in srgb, var(--ag-selected-row-background-color) 72%, transparent);
+    }
+    .ag-theme-alpine.striped-grid .ag-row.ag-row-odd:not(.ag-row-selected) .ag-cell,
+    .ag-theme-alpine-dark.striped-grid .ag-row.ag-row-odd:not(.ag-row-selected) .ag-cell {
+      background-color: var(--ag-odd-row-background-color);
+    }
+    .table-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+
+    body.table-fullscreen .header,
+    body.table-fullscreen .filters,
+    body.table-fullscreen .kpi-grid,
+    body.table-fullscreen .chart-panel {
+      display: none !important;
+    }
+    body.table-fullscreen .layout {
+      display: block;
+    }
+    body.table-fullscreen .table-panel {
+      position: fixed;
+      inset: 10px;
+      z-index: 9999;
+      margin: 0;
+      border-radius: 12px;
+      min-height: calc(100dvh - 20px);
+      max-height: calc(100dvh - 20px);
+      overflow: hidden;
+    }
+    body.table-fullscreen .table-wrap {
+      height: calc(100dvh - 170px);
+    }
+    body.table-fullscreen #agGridRoot {
+      height: calc(100dvh - 170px);
+    }
     @media (max-width: 980px) {
       .layout { grid-template-columns: 1fr; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
       .bar-track { height: 10px; }
       .pie-wrap { grid-template-columns: 1fr; }
-      table { min-width: 0; }
-      th, td { white-space: normal; word-break: break-word; }
+      #agGridRoot { height: min(58vh, 460px); }
     }
+    ${themeOverrides}
+    ${agGridThemeOverrides}
   </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community/styles/ag-grid.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community/styles/ag-theme-alpine.css" />
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community/dist/ag-grid-community.min.js"></script>
 </head>
 <body>
   <div class="wrapper">
@@ -1872,11 +2471,12 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     ${showFilters ? `<section class="filters" id="filtersPanel"></section>` : ''}
 
     <div class="kpi-grid">
-      <div class="card"><div class="label">Rows analyzed</div><div class="value">${kpiCount}</div></div>
-      <div class="card"><div class="label">Columns</div><div class="value">${headers.length}</div></div>
-      <div class="card"><div class="label">Source files</div><div class="value">${sourceCount}</div></div>
-      <div class="card"><div class="label">Average ${metricColumnIndex >= 0 ? headers[metricColumnIndex] : 'Metric'}</div><div class="value">${avgMetric !== null ? avgMetric.toFixed(2) : 'N/A'}</div></div>
-      <div class="card"><div class="label">Peak ${metricColumnIndex >= 0 ? headers[metricColumnIndex] : 'Metric'}</div><div class="value">${maxValue !== null ? maxValue : 'N/A'}</div></div>
+      <div class="card"><div class="label">Rows analyzed</div><div class="value" id="kpi-rows">${kpiCount}</div></div>
+      <div class="card"><div class="label">Columns</div><div class="value" id="kpi-columns">${headers.length}</div></div>
+      <div class="card"><div class="label">Source files</div><div class="value" id="kpi-sources">${sourceCount}</div></div>
+      <div class="card"><div class="label" id="kpi-primary-label">${primaryKpiLabelEscaped}</div><div class="value" id="kpi-primary-value">—</div></div>
+      <div class="card"><div class="label" id="kpi-secondary-label">${secondaryKpiLabelEscaped}</div><div class="value" id="kpi-secondary-value">—</div></div>
+      <div class="card"><div class="label" id="kpi-selection-label">Selected total</div><div class="value" id="kpi-selection-value">—</div></div>
     </div>
 
     <div class="layout">
@@ -1886,12 +2486,26 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
       </section>
 
       <section class="table-panel" style="${wantsTable ? '' : 'display:none;'}">
-        <h2 class="panel-title">Detailed table</h2>
+        <div class="table-panel-head">
+          <h2 class="panel-title">Advanced data table</h2>
+          <button id="tableFullscreenToggle" type="button" class="table-fullscreen-toggle" aria-pressed="false">Fullscreen Table</button>
+        </div>
+        <div class="table-tools">
+          <input id="tableQuickFilter" class="table-input" type="text" placeholder="Quick filter across all columns" />
+          <select id="tablePageSize" class="table-select">
+            <option value="10">10 rows</option>
+            <option value="25">25 rows</option>
+            <option value="50">50 rows</option>
+            <option value="100">100 rows</option>
+            <option value="200">200 rows</option>
+          </select>
+          <button id="clearSelectionBtn" type="button" class="table-action">Clear Selection</button>
+        </div>
         <div class="table-wrap">
-          <table id="dataTable">
-            <thead><tr>${safeHeaders.map((header) => `<th>${header}</th>`).join('')}</tr></thead>
-            <tbody>${safeRows.slice(0, 80).map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody>
-          </table>
+          <div id="agGridRoot" class="${agGridThemeClass}"></div>
+        </div>
+        <div class="table-footer">
+          <div id="tableSummary" style="font-size:12px;color:#b8c0e8;">0 rows</div>
         </div>
       </section>
     </div>
@@ -1908,6 +2522,31 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     const SORT_BY_COL = ${sortByColumnIndexJson};
     const GROUP_BY_COL = ${groupByColumnIndexJson};
     const SORT_DIR = ${sortDirectionJson};
+    const INITIAL_VISIBLE_COLS = ${visibleColumnsJson};
+    const DEFAULT_PAGE_SIZE = ${requestedPageSizeJson};
+    const TABLE_COMPACT = ${compactTableJson};
+    const TABLE_STRIPED = ${stripedTableJson};
+    const TABLE_FREEZE_FIRST_COL = ${freezeFirstColumnJson};
+    const AG_GRID_ENABLE_PIVOT = ${agGridEnablePivotJson};
+    const AG_GRID_SHOW_GROUP_PANEL = ${agGridShowRowGroupPanelJson};
+    const AG_GRID_FIT_COLUMNS = ${agGridFitColumnsJson};
+    const AG_GRID_AUTO_SIZE_COLUMNS = ${agGridAutoSizeColumnsJson};
+    const AG_GRID_SHOW_STATUS_BAR = ${agGridShowStatusBarJson};
+    const AG_GRID_WRAP_TEXT = ${agGridWrapTextJson};
+    const AG_GRID_LOCK_COLUMNS = ${agGridLockColumnsJson};
+    const PRIMARY_KPI_MODE = ${primaryKpiModeJson};
+    const SECONDARY_KPI_MODE = ${secondaryKpiModeJson};
+
+    const tableState = {
+      quickFilter: '',
+      pageSize: DEFAULT_PAGE_SIZE,
+      visibleCols: Array.isArray(INITIAL_VISIBLE_COLS) && INITIAL_VISIBLE_COLS.length === HEADERS.length
+        ? INITIAL_VISIBLE_COLS.slice()
+        : HEADERS.map(() => true),
+    };
+
+    let gridApi = null;
+    const manualSelectedCells = new Map();
 
     const parseNumeric = (value) => {
       const cleaned = String(value || '').replace(/,/g, '').replace(/%/g, '').trim();
@@ -2007,10 +2646,437 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
       });
     };
 
+    const applyQuickFilter = (rows) => {
+      const query = String(tableState.quickFilter || '').trim().toLowerCase();
+      if (!query) return rows;
+      return rows.filter((row) => row.some((cell, colIndex) => {
+        if (!tableState.visibleCols[colIndex]) return false;
+        return String(cell || '').toLowerCase().includes(query);
+      }));
+    };
+
+    const getCellSelectionKey = (rowNode, colId) => {
+      const rowToken = rowNode && (rowNode.id ?? rowNode.rowIndex ?? 'row');
+      return String(rowToken) + '::' + String(colId || '');
+    };
+
+    const selectionState = {
+      anchorRowIndex: null,
+      anchorColId: null,
+      pendingShiftRangeFromKeyboard: false,
+    };
+
+    const getVisibleColIds = () => HEADERS
+      .map((_, index) => ({ index, colId: 'c_' + index }))
+      .filter(({ index }) => tableState.visibleCols[index])
+      .map(({ colId }) => colId);
+
+    const getColIndexFromId = (colId) => {
+      const raw = String(colId || '').replace(/^c_/, '');
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? parsed : -1;
+    };
+
+    const getHeaderFromColId = (colId) => {
+      const index = getColIndexFromId(colId);
+      return index >= 0 ? (HEADERS[index] || colId) : colId;
+    };
+
+    const setSelectionAnchor = (rowIndex, colId) => {
+      selectionState.anchorRowIndex = Number.isInteger(rowIndex) ? rowIndex : null;
+      selectionState.anchorColId = colId || null;
+    };
+
+    const toggleSingleCellSelection = (rowNode, colId, forceAdd = false) => {
+      if (!rowNode || !colId) return;
+      const key = getCellSelectionKey(rowNode, colId);
+      if (manualSelectedCells.has(key) && !forceAdd) {
+        manualSelectedCells.delete(key);
+        return;
+      }
+      const data = rowNode.data || {};
+      manualSelectedCells.set(key, {
+        colId,
+        headerName: getHeaderFromColId(colId),
+        value: data[colId],
+      });
+    };
+
+    const addRangeSelection = (fromRowIndex, fromColId, toRowIndex, toColId, append = true) => {
+      if (!gridApi) return;
+
+      const visibleColIds = getVisibleColIds();
+      if (!visibleColIds.length) return;
+
+      const startColIndex = visibleColIds.indexOf(fromColId);
+      const endColIndex = visibleColIds.indexOf(toColId);
+      if (startColIndex < 0 || endColIndex < 0) return;
+
+      if (!append) {
+        manualSelectedCells.clear();
+      }
+
+      const rowStart = Math.min(fromRowIndex, toRowIndex);
+      const rowEnd = Math.max(fromRowIndex, toRowIndex);
+      const colStart = Math.min(startColIndex, endColIndex);
+      const colEnd = Math.max(startColIndex, endColIndex);
+
+      for (let rowIndex = rowStart; rowIndex <= rowEnd; rowIndex += 1) {
+        const rowNode = typeof gridApi.getDisplayedRowAtIndex === 'function' ? gridApi.getDisplayedRowAtIndex(rowIndex) : null;
+        if (!rowNode || !rowNode.data) continue;
+
+        for (let colIndex = colStart; colIndex <= colEnd; colIndex += 1) {
+          const colId = visibleColIds[colIndex];
+          if (!colId) continue;
+          toggleSingleCellSelection(rowNode, colId, true);
+        }
+      }
+    };
+
+    const isCellManuallySelected = (params) => {
+      if (!params || !params.node) return false;
+      const colId = params.colDef && params.colDef.field ? params.colDef.field : '';
+      if (!colId) return false;
+      return manualSelectedCells.has(getCellSelectionKey(params.node, colId));
+    };
+
+    const refreshManualCellStyles = () => {
+      if (gridApi && typeof gridApi.refreshCells === 'function') {
+        try { gridApi.refreshCells({ force: true }); } catch {}
+      }
+    };
+
+    const clearManualCellSelection = () => {
+      manualSelectedCells.clear();
+      refreshManualCellStyles();
+      resetSelectionKpi();
+    };
+
     const renderTable = (rows) => {
-      const tbody = document.querySelector('#dataTable tbody');
-      if (!tbody) return;
-      tbody.innerHTML = rows.slice(0, 200).map((row) => '<tr>' + HEADERS.map((_, index) => '<td>' + escapeHtml(row[index] || '') + '</td>').join('') + '</tr>').join('');
+      const root = document.getElementById('agGridRoot');
+      if (!root) return;
+      if (TABLE_COMPACT) root.classList.add('compact-grid'); else root.classList.remove('compact-grid');
+      if (TABLE_STRIPED) root.classList.add('striped-grid'); else root.classList.remove('striped-grid');
+
+      const visibleIndexes = HEADERS.map((_, index) => index).filter((index) => tableState.visibleCols[index]);
+      const firstVisibleIndex = visibleIndexes.length ? visibleIndexes[0] : -1;
+      const rowObjects = rows.map((row) => {
+        const obj = {};
+        HEADERS.forEach((_, index) => {
+          obj['c_' + index] = String(row[index] || '');
+        });
+        return obj;
+      });
+
+      if (!gridApi) {
+        if (!(window.agGrid && typeof window.agGrid.createGrid === 'function')) {
+          root.innerHTML = '<div style="padding:12px;color:#b8c0e8;font-size:12px;">AG Grid failed to load. Please check internet access.</div>';
+          return;
+        }
+
+        const columnDefs = HEADERS.map((header, index) => ({
+          headerName: header || ('Column ' + (index + 1)),
+          field: 'c_' + index,
+          hide: !tableState.visibleCols[index],
+          sortable: true,
+          filter: true,
+          resizable: true,
+          floatingFilter: true,
+          wrapText: AG_GRID_WRAP_TEXT,
+          autoHeight: AG_GRID_WRAP_TEXT,
+          enableValue: true,
+          enableRowGroup: true,
+          enablePivot: AG_GRID_ENABLE_PIVOT,
+          cellClassRules: {
+            'table-cell-selected': (params) => isCellManuallySelected(params),
+          },
+          pinned: TABLE_FREEZE_FIRST_COL && index === firstVisibleIndex ? 'left' : undefined,
+        }));
+
+        gridApi = window.agGrid.createGrid(root, {
+          columnDefs,
+          rowData: rowObjects,
+          defaultColDef: {
+            minWidth: 120,
+            sortable: true,
+            filter: true,
+            resizable: true,
+            wrapText: AG_GRID_WRAP_TEXT,
+            autoHeight: AG_GRID_WRAP_TEXT,
+          },
+          animateRows: true,
+          cellSelection: true,
+          enableRangeSelection: true,
+          rowSelection: { mode: 'multiRow', checkboxes: false, headerCheckbox: false },
+          sideBar: {
+            toolPanels: ['columns', 'filters'],
+          },
+          pivotMode: AG_GRID_ENABLE_PIVOT,
+          rowGroupPanelShow: AG_GRID_SHOW_GROUP_PANEL ? 'always' : 'never',
+          suppressMovableColumns: AG_GRID_LOCK_COLUMNS,
+          statusBar: AG_GRID_SHOW_STATUS_BAR
+            ? {
+                statusPanels: [
+                  { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
+                  { statusPanel: 'agAggregationComponent', align: 'right' },
+                ],
+              }
+            : undefined,
+          onCellClicked: (params) => {
+            const colId = params && params.colDef && params.colDef.field ? params.colDef.field : '';
+            if (!colId || !params.node) return;
+
+            const nativeEvent = params.event;
+            const isModifier = !!(nativeEvent && (nativeEvent.ctrlKey || nativeEvent.metaKey));
+            const isShift = !!(nativeEvent && nativeEvent.shiftKey);
+
+            if (isShift && Number.isInteger(selectionState.anchorRowIndex) && selectionState.anchorColId) {
+              addRangeSelection(selectionState.anchorRowIndex, selectionState.anchorColId, params.node.rowIndex, colId, true);
+            } else {
+              if (isModifier) {
+                toggleSingleCellSelection(params.node, colId, false);
+              } else {
+                toggleSingleCellSelection(params.node, colId, true);
+              }
+              setSelectionAnchor(params.node.rowIndex, colId);
+            }
+
+            refreshManualCellStyles();
+            updateSelectionKpiFromSelectedCells();
+          },
+          onCellKeyDown: (params) => {
+            const event = params && params.event;
+            if (!event) return;
+
+            const colId = params && params.colDef && params.colDef.field ? params.colDef.field : '';
+            const rowIndex = params && params.node && Number.isInteger(params.node.rowIndex) ? params.node.rowIndex : null;
+            if (!colId || rowIndex === null) return;
+
+            const key = String(event.key || '');
+            const isToggleKey = key === ' ' || key === 'Enter';
+            const isArrowKey = key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight';
+
+            if (isToggleKey) {
+              event.preventDefault();
+              toggleSingleCellSelection(params.node, colId, event.shiftKey ? true : false);
+              setSelectionAnchor(rowIndex, colId);
+              refreshManualCellStyles();
+              updateSelectionKpiFromSelectedCells();
+              return;
+            }
+
+            if (isArrowKey && event.shiftKey) {
+              if (!Number.isInteger(selectionState.anchorRowIndex) || !selectionState.anchorColId) {
+                setSelectionAnchor(rowIndex, colId);
+              }
+              selectionState.pendingShiftRangeFromKeyboard = true;
+              window.setTimeout(() => {
+                if (!gridApi || !selectionState.pendingShiftRangeFromKeyboard) return;
+                selectionState.pendingShiftRangeFromKeyboard = false;
+                const focused = typeof gridApi.getFocusedCell === 'function' ? gridApi.getFocusedCell() : null;
+                if (!focused || !Number.isInteger(focused.rowIndex) || !focused.column || typeof focused.column.getColId !== 'function') return;
+                const focusedColId = focused.column.getColId();
+                addRangeSelection(selectionState.anchorRowIndex, selectionState.anchorColId, focused.rowIndex, focusedColId, true);
+                refreshManualCellStyles();
+                updateSelectionKpiFromSelectedCells();
+              }, 0);
+            }
+          },
+          onRangeSelectionChanged: () => updateSelectionKpiFromSelectedCells(),
+          onCellSelectionChanged: () => updateSelectionKpiFromSelectedCells(),
+          pagination: true,
+          paginationPageSize: tableState.pageSize,
+          suppressCellFocus: false,
+        });
+
+        applyGridSizing();
+      } else {
+        const colDefs = HEADERS.map((header, index) => ({
+          headerName: header || ('Column ' + (index + 1)),
+          field: 'c_' + index,
+          hide: !tableState.visibleCols[index],
+          sortable: true,
+          filter: true,
+          resizable: true,
+          floatingFilter: true,
+          wrapText: AG_GRID_WRAP_TEXT,
+          autoHeight: AG_GRID_WRAP_TEXT,
+          enableValue: true,
+          enableRowGroup: true,
+          enablePivot: AG_GRID_ENABLE_PIVOT,
+          cellClassRules: {
+            'table-cell-selected': (params) => isCellManuallySelected(params),
+          },
+          pinned: TABLE_FREEZE_FIRST_COL && index === firstVisibleIndex ? 'left' : undefined,
+        }));
+        gridApi.setGridOption('columnDefs', colDefs);
+        gridApi.setGridOption('rowData', rowObjects);
+        gridApi.paginationSetPageSize(tableState.pageSize);
+        gridApi.setGridOption('pivotMode', AG_GRID_ENABLE_PIVOT);
+        gridApi.setGridOption('rowGroupPanelShow', AG_GRID_SHOW_GROUP_PANEL ? 'always' : 'never');
+        gridApi.setGridOption('suppressMovableColumns', AG_GRID_LOCK_COLUMNS);
+        gridApi.setGridOption('statusBar', AG_GRID_SHOW_STATUS_BAR
+          ? {
+              statusPanels: [
+                { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
+                { statusPanel: 'agAggregationComponent', align: 'right' },
+              ],
+            }
+          : undefined);
+        applyGridSizing();
+      }
+
+      if (gridApi) {
+        if (typeof gridApi.setGridOption === 'function') {
+          gridApi.setGridOption('quickFilterText', tableState.quickFilter);
+        } else if (typeof gridApi.setQuickFilter === 'function') {
+          gridApi.setQuickFilter(tableState.quickFilter);
+        }
+      }
+
+      const displayedRows = gridApi && typeof gridApi.getDisplayedRowCount === 'function'
+        ? gridApi.getDisplayedRowCount()
+        : rows.length;
+      const summary = document.getElementById('tableSummary');
+      if (summary) summary.textContent = displayedRows + ' rows visible • ' + rows.length + ' rows total';
+    };
+
+    const resetSelectionKpi = () => {
+      const labelEl = document.getElementById('kpi-selection-label');
+      const valueEl = document.getElementById('kpi-selection-value');
+      if (!labelEl || !valueEl) return;
+      labelEl.textContent = 'Selected total';
+      valueEl.textContent = '—';
+    };
+
+    const updateSelectionKpiFromSelectedCells = () => {
+      const labelEl = document.getElementById('kpi-selection-label');
+      const valueEl = document.getElementById('kpi-selection-value');
+      if (!labelEl || !valueEl) {
+        return;
+      }
+
+      if (manualSelectedCells.size > 0) {
+        const byColumn = new Map();
+        manualSelectedCells.forEach((entry) => {
+          const colId = entry.colId || '';
+          if (!colId) return;
+          const header = entry.headerName || colId;
+          const numeric = parseNumeric(entry.value);
+          const bucket = byColumn.get(colId) || { header, sum: 0, count: 0, numericCount: 0 };
+          bucket.count += 1;
+          if (numeric !== null) {
+            bucket.numericCount += 1;
+            bucket.sum += numeric;
+          }
+          byColumn.set(colId, bucket);
+        });
+
+        if (byColumn.size !== 1) {
+          labelEl.textContent = 'Selected total';
+          valueEl.textContent = 'Select one column';
+          return;
+        }
+
+        const onlyColumn = Array.from(byColumn.values())[0];
+        labelEl.textContent = 'Selected total (' + onlyColumn.header + ')';
+        if (onlyColumn.numericCount > 0) {
+          valueEl.textContent = formatMetric(onlyColumn.sum);
+        } else {
+          valueEl.textContent = String(onlyColumn.count) + ' cells';
+        }
+        return;
+      }
+
+      if (!gridApi || typeof gridApi.getCellRanges !== 'function') {
+        resetSelectionKpi();
+        return;
+      }
+
+      const ranges = gridApi.getCellRanges() || [];
+      if (!ranges.length) {
+        resetSelectionKpi();
+        return;
+      }
+
+      const uniqueCells = new Set();
+      const byColumn = new Map();
+
+      ranges.forEach((range) => {
+        const columns = Array.isArray(range.columns) ? range.columns : [];
+        const startRowIndex = range.startRow && Number.isInteger(range.startRow.rowIndex) ? range.startRow.rowIndex : null;
+        const endRowIndex = range.endRow && Number.isInteger(range.endRow.rowIndex) ? range.endRow.rowIndex : null;
+        if (startRowIndex === null || endRowIndex === null || !columns.length) return;
+
+        const from = Math.min(startRowIndex, endRowIndex);
+        const to = Math.max(startRowIndex, endRowIndex);
+
+        for (let rowIndex = from; rowIndex <= to; rowIndex += 1) {
+          const rowNode = typeof gridApi.getDisplayedRowAtIndex === 'function' ? gridApi.getDisplayedRowAtIndex(rowIndex) : null;
+          if (!rowNode || !rowNode.data) continue;
+
+          columns.forEach((column) => {
+            const colId = column && typeof column.getColId === 'function' ? column.getColId() : '';
+            if (!colId) return;
+
+            const uniqueKey = String(rowIndex) + ':' + colId;
+            if (uniqueCells.has(uniqueKey)) return;
+            uniqueCells.add(uniqueKey);
+
+            const headerName = column && typeof column.getColDef === 'function'
+              ? String(column.getColDef().headerName || colId)
+              : colId;
+
+            const bucket = byColumn.get(colId) || { header: headerName, sum: 0, count: 0, numericCount: 0 };
+            const rawValue = rowNode.data[colId];
+            const numeric = parseNumeric(rawValue);
+
+            bucket.count += 1;
+            if (numeric !== null) {
+              bucket.numericCount += 1;
+              bucket.sum += numeric;
+            }
+
+            byColumn.set(colId, bucket);
+          });
+        }
+      });
+
+      if (byColumn.size !== 1) {
+        labelEl.textContent = 'Selected total';
+        valueEl.textContent = 'Select one column';
+        return;
+      }
+
+      const onlyColumn = Array.from(byColumn.values())[0];
+      if (onlyColumn.count < 1) {
+        resetSelectionKpi();
+        return;
+      }
+
+      labelEl.textContent = 'Selected total (' + onlyColumn.header + ')';
+      if (onlyColumn.numericCount > 0) {
+        valueEl.textContent = formatMetric(onlyColumn.sum);
+      } else {
+        valueEl.textContent = String(onlyColumn.count) + ' cells';
+      }
+    };
+
+    const applyGridSizing = () => {
+      if (!gridApi) return;
+      if (AG_GRID_AUTO_SIZE_COLUMNS && typeof gridApi.autoSizeAllColumns === 'function') {
+        try {
+          gridApi.autoSizeAllColumns(false);
+          return;
+        } catch {
+        }
+      }
+      if (AG_GRID_FIT_COLUMNS && typeof gridApi.sizeColumnsToFit === 'function') {
+        try {
+          gridApi.sizeColumnsToFit();
+        } catch {
+        }
+      }
     };
 
     const renderChart = (rows) => {
@@ -2080,26 +3146,149 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
       }).join('');
     };
 
+    const formatMetric = (value) => {
+      if (value === null || value === undefined || Number.isNaN(value)) return 'N/A';
+      const abs = Math.abs(value);
+      if (abs >= 1e9) return (value / 1e9).toFixed(2) + 'B';
+      if (abs >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+      if (abs >= 1e3) return (value / 1e3).toFixed(2) + 'K';
+      return Number(value).toFixed(2);
+    };
+
+    const computeMedian = (values) => {
+      if (!values.length) return null;
+      const sorted = values.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+      }
+      return sorted[mid];
+    };
+
+    const computeVariance = (values) => {
+      if (!values.length) return null;
+      const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+      return values.reduce((sum, value) => sum + Math.pow(value - avg, 2), 0) / values.length;
+    };
+
     const renderKpis = (rows) => {
-      const cards = document.querySelectorAll('.kpi-grid .card .value');
-      if (!cards.length) return;
+      const rowsEl = document.getElementById('kpi-rows');
+      const columnsEl = document.getElementById('kpi-columns');
+      const sourcesEl = document.getElementById('kpi-sources');
+      const primaryEl = document.getElementById('kpi-primary-value');
+      const secondaryEl = document.getElementById('kpi-secondary-value');
+      if (!rowsEl || !columnsEl || !sourcesEl || !primaryEl || !secondaryEl) return;
+
+      rowsEl.textContent = String(rows.length);
+      columnsEl.textContent = String(HEADERS.length);
+      sourcesEl.textContent = String(${sourceCount});
+
       const values = METRIC_COL >= 0
         ? rows.map((row) => parseNumeric(row[METRIC_COL] || '')).filter((value) => value !== null)
         : [];
-      const avg = values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2) : 'N/A';
-      const peak = values.length ? String(Math.max(...values)) : 'N/A';
-      cards[0].textContent = String(rows.length);
-      cards[3].textContent = avg;
-      cards[4].textContent = peak;
+
+      let primaryValue = null;
+      if (PRIMARY_KPI_MODE === 'sum') {
+        primaryValue = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+      } else if (PRIMARY_KPI_MODE === 'median') {
+        primaryValue = computeMedian(values);
+      } else if (PRIMARY_KPI_MODE === 'count') {
+        primaryValue = rows.length;
+      } else {
+        primaryValue = values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+      }
+
+      let secondaryValue = null;
+      if (SECONDARY_KPI_MODE === 'group-count' && GROUP_BY_COL >= 0) {
+        secondaryValue = new Set(rows.map((row) => String(row[GROUP_BY_COL] || '').trim()).filter(Boolean)).size;
+      } else if (SECONDARY_KPI_MODE === 'variance') {
+        secondaryValue = computeVariance(values);
+      } else if (SECONDARY_KPI_MODE === 'range') {
+        secondaryValue = values.length ? (Math.max(...values) - Math.min(...values)) : null;
+      } else if (SECONDARY_KPI_MODE === 'distinct' && LABEL_COL >= 0) {
+        secondaryValue = new Set(rows.map((row) => String(row[LABEL_COL] || '').trim()).filter(Boolean)).size;
+      } else {
+        secondaryValue = computeMedian(values);
+      }
+
+      primaryEl.textContent = PRIMARY_KPI_MODE === 'count' ? String(primaryValue ?? '0') : formatMetric(primaryValue);
+      secondaryEl.textContent = (SECONDARY_KPI_MODE === 'group-count' || SECONDARY_KPI_MODE === 'distinct')
+        ? String(secondaryValue ?? 0)
+        : formatMetric(secondaryValue);
     };
 
     function renderAll() {
       const filtered = getFilteredRows();
       const transformed = applyDataTransforms(filtered);
-      renderKpis(transformed);
-      renderChart(transformed);
-      renderTable(transformed);
+      const searched = applyQuickFilter(transformed);
+      renderKpis(searched);
+      renderChart(searched);
+      renderTable(searched);
+      if (manualSelectedCells.size > 0) {
+        clearManualCellSelection();
+      }
+      updateSelectionKpiFromSelectedCells();
     }
+
+    const quickFilterInput = document.getElementById('tableQuickFilter');
+    if (quickFilterInput) {
+      quickFilterInput.value = tableState.quickFilter;
+      quickFilterInput.addEventListener('input', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        tableState.quickFilter = target.value || '';
+        renderAll();
+      });
+    }
+
+    const pageSizeSelect = document.getElementById('tablePageSize');
+    if (pageSizeSelect) {
+      pageSizeSelect.value = String(tableState.pageSize);
+      pageSizeSelect.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        const next = Number(target.value);
+        tableState.pageSize = Number.isFinite(next) ? Math.max(10, Math.min(200, next)) : 25;
+        renderAll();
+      });
+    }
+
+    const clearSelectionBtn = document.getElementById('clearSelectionBtn');
+    if (clearSelectionBtn) {
+      clearSelectionBtn.addEventListener('click', () => {
+        clearManualCellSelection();
+        updateSelectionKpiFromSelectedCells();
+      });
+    }
+
+    const tableFullscreenToggle = document.getElementById('tableFullscreenToggle');
+    const syncTableFullscreenState = () => {
+      if (!tableFullscreenToggle) return;
+      const isFullscreen = document.body.classList.contains('table-fullscreen');
+      tableFullscreenToggle.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Table';
+      tableFullscreenToggle.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
+    };
+
+    if (tableFullscreenToggle) {
+      tableFullscreenToggle.addEventListener('click', () => {
+        document.body.classList.toggle('table-fullscreen');
+        syncTableFullscreenState();
+        if (gridApi && typeof gridApi.sizeColumnsToFit === 'function') {
+          window.setTimeout(() => {
+            try { applyGridSizing(); } catch {}
+          }, 80);
+        }
+      });
+    }
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && document.body.classList.contains('table-fullscreen')) {
+        document.body.classList.remove('table-fullscreen');
+        syncTableFullscreenState();
+      }
+    });
+
+    syncTableFullscreenState();
 
     renderFilters();
     renderAll();
@@ -2166,7 +3355,11 @@ export async function processAIToolRequest(request: AIToolRequest): Promise<AITo
         };
       }
       const imageBuffer = typeof request.file === 'string' ? Buffer.from(request.file, 'base64') : request.file;
-      return performOCR(imageBuffer, request.options);
+      return performOCR(imageBuffer, {
+        ...(request.options || {}),
+        mimeType: request.mimeType,
+        fileName: request.fileName,
+      });
 
     case 'document':
       if (!request.prompt) {

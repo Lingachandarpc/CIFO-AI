@@ -135,6 +135,45 @@ function extractProfileFromHistory(
   }
   
   // ========================================================================
+  // Extract INTERESTS - CUMULATIVE
+  // ========================================================================
+  const interestSignals: string[] = [];
+
+  for (const msg of userMessages) {
+    const interestPatterns = [
+      /(?:i\s+love|i\s+like|i\s+enjoy|i\s+am\s+interested\s+in|i'm\s+interested\s+in|my\s+interests?\s+are)\s+([^.,!?]{2,80})/i,
+      /(?:my\s+hobb(?:y|ies)\s+(?:is|are)|in\s+my\s+free\s+time\s+i)\s+([^.,!?]{2,80})/i,
+      /(?:i\s+follow|i\s+read\s+about|i\s+work\s+on)\s+([^.,!?]{2,80})/i,
+    ];
+
+    for (const pattern of interestPatterns) {
+      const match = msg.match(pattern);
+      if (!match?.[1]) continue;
+
+      const parts = match[1]
+        .split(/,|\band\b|\||\//i)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 2 && part.length <= 40);
+
+      for (const interest of parts) {
+        interestSignals.push(interest);
+      }
+    }
+  }
+
+  if (interestSignals.length > 0) {
+    const existingInterests = (profile?.interests || '')
+      .split('|')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const allInterests = [...existingInterests, ...interestSignals];
+    const uniqueLower = Array.from(new Set(allInterests.map((item) => item.toLowerCase()))).slice(0, 20);
+    profile.interests = allInterests
+      .filter((item) => uniqueLower.includes(item.toLowerCase()))
+      .join(' | ');
+  }
+
+  // ========================================================================
   // Extract PULSE (Personality Traits) - CUMULATIVE
   // ========================================================================
   const pulseTraits: string[] = [];
@@ -359,6 +398,286 @@ function formatDayOfWeekResponse(language: string, date: Date): string {
   return templates[language] || `Today is ${dayName}.`;
 }
 
+function detectLanguageFromQuery(query: string): string | null {
+  if (!query) return null;
+  const normalized = query.toLowerCase().trim();
+  const normalizedAscii = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  if (/[\u0B80-\u0BFF]/.test(query)) return 'Tamil';
+  if (/[\u0C00-\u0C7F]/.test(query)) return 'Telugu';
+  if (/[\u0900-\u097F]/.test(query)) return 'Hindi';
+  if (/[\u0980-\u09FF]/.test(query)) return 'Bengali';
+  if (/[\u0D00-\u0D7F]/.test(query)) return 'Malayalam';
+  if (/[\u0C80-\u0CFF]/.test(query)) return 'Kannada';
+  if (/[\u0A80-\u0AFF]/.test(query)) return 'Gujarati';
+  if (/[\u0A00-\u0A7F]/.test(query)) return 'Punjabi';
+  if (/[\u4E00-\u9FFF]/.test(query)) return 'Chinese';
+  if (/[\u3040-\u30FF]/.test(query)) return 'Japanese';
+
+  const explicitMap: Array<{ lang: string; pattern: RegExp }> = [
+    { lang: 'Tamil', pattern: /\b(in|reply in|answer in|speak in)\s+tamil\b|\btamil\s*(la|il|mozhi|language)\b/i },
+    { lang: 'Hindi', pattern: /\b(in|reply in|answer in|speak in)\s+hindi\b|\bhindi\s*(me|mein|language)\b/i },
+    { lang: 'Telugu', pattern: /\b(in|reply in|answer in|speak in)\s+telugu\b|\btelugu\s*(lo|language)\b/i },
+    { lang: 'Malayalam', pattern: /\b(in|reply in|answer in|speak in)\s+malayalam\b/i },
+    { lang: 'Kannada', pattern: /\b(in|reply in|answer in|speak in)\s+kannada\b/i },
+    { lang: 'Bengali', pattern: /\b(in|reply in|answer in|speak in)\s+bengali\b|\bbangla\b/i },
+    { lang: 'Marathi', pattern: /\b(in|reply in|answer in|speak in)\s+marathi\b/i },
+    { lang: 'Gujarati', pattern: /\b(in|reply in|answer in|speak in)\s+gujarati\b/i },
+    { lang: 'Punjabi', pattern: /\b(in|reply in|answer in|speak in)\s+punjabi\b/i },
+    { lang: 'Spanish', pattern: /\b(in|reply in|answer in|speak in)\s+spanish\b|\bespañol\b/i },
+    { lang: 'French', pattern: /\b(in|reply in|answer in|speak in)\s+french\b|\bfrançais\b/i },
+    { lang: 'German', pattern: /\b(in|reply in|answer in|speak in)\s+german\b|\bdeutsch\b/i },
+    { lang: 'Portuguese', pattern: /\b(in|reply in|answer in|speak in)\s+portuguese\b/i },
+    { lang: 'Chinese', pattern: /\b(in|reply in|answer in|speak in)\s+chinese\b|\bmandarin\b/i },
+    { lang: 'Japanese', pattern: /\b(in|reply in|answer in|speak in)\s+japanese\b/i },
+  ];
+
+  for (const item of explicitMap) {
+    if (item.pattern.test(normalized) || item.pattern.test(normalizedAscii)) return item.lang;
+  }
+
+  if (
+    /\bun\s+per\s+enna\b|\bunga\s+per\s+enna\b|\benna\b|\byaar\b|\bthalaivar\b|\bavar\b|\bavanga\b|\bavarukku\b|\benna\s+aachi\b|\benna\s+achu\b|\benna\s+aachu\b|\bvanakkam\b|\bnandri\b|\beppadi\b|\bepdi\b|\birukku\b|\biruka\b|\birukka\b|\benge\b|\binga\b|\bsollu\b|\bsolunga\b|\btheriyuma\b|\btheriyala\b|\bromba\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Tamil';
+  }
+
+  if (/\bnamaste\b|\bkaise\s+ho\b|\baap\s+ka\s+naam\s+kya\b|\bkya\s+haal\s+hai\b/i.test(normalized)) {
+    return 'Hindi';
+  }
+
+  if (
+    /\bmee\s+peru\s+enti\b|\bmeeku\s+peru\s+enti\b|\bela\s+unnav\b|\bela\s+unnaru\b|\bem\s+jarigindi\b|\bnidra\b|\bnidhra\b|\bnidhara\b|\bosthundi\b|\bosthundhi\b|\bvasthundi\b|\bvastundi\b|\bnidra\s+osthundi\b|\bnidhara\s+osthundhi\b|\bcheppandi\b|\bcheppu\b|\btelugu\s*(lo|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Telugu';
+  }
+
+  if (
+    /\bente\s+peru\b|\bsukhamano\b|\bningal\s+sukhamano\b|\benthaanu\b|\bentha\b|\bparayu\b|\bmalayalam\s*(il|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Malayalam';
+  }
+
+  if (
+    /\bnamaskara\b|\bnimma\s+hesaru\s+yenu\b|\bhegiddira\b|\bhegiddiya\b|\bheli\b|\btilisi\b|\bkannada\s*(dalli|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Kannada';
+  }
+
+  if (
+    /\bnomoskar\b|\bnomoshkar\b|\bapnar\s+nam\s+ki\b|\bkemon\s+acho\b|\bkemon\s+achen\b|\bki\s+hoyeche\b|\bbangla\b|\bbengali\s*(te|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Bengali';
+  }
+
+  if (
+    /\bnamaskar\b|\btumcha\s+naav\s+kay\b|\bkasa\s+ahes\b|\bkashi\s+ahes\b|\bkase\s+aahat\b|\bkay\s+zala\b|\bmarathi\s*(madhe|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Marathi';
+  }
+
+  if (
+    /\bkem\s+cho\b|\btamaru\s+naam\s+shu\b|\bsaru\s+che\b|\bgujarati\s*(ma|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Gujarati';
+  }
+
+  if (
+    /\bsat\s+sri\s+akal\b|\btuhada\s+naa[mn]\s+ki\b|\bki\s+haal\s+aa\b|\bpunjabi\s*(vich|language)\b/i.test(
+      normalized
+    )
+  ) {
+    return 'Punjabi';
+  }
+
+  if (/\bhola\b|\bcomo\s+estas\b|\bque\s+tal\b|\bgracias\b|\bespanol\b|\bespañol\b/i.test(normalized)) {
+    return 'Spanish';
+  }
+
+  if (/\bbonjour\b|\bcomment\s+ca\s+va\b|\bmerci\b|\bfrancais\b|\bfrançais\b|\bchoses\b|\bcelebre\b|\bcelebres\b|\bparis\b|\bfrance\b/i.test(normalizedAscii)) {
+    return 'French';
+  }
+
+  if (/\bhallo\b|\bwie\s+geht\s+es\b|\bdanke\b|\bdeutsch\b/i.test(normalized)) {
+    return 'German';
+  }
+
+  if (/\bola\b|\bcomo\s+vai\b|\bobrigado\b|\bobrigada\b|\bportugues\b|\bportuguês\b/i.test(normalized)) {
+    return 'Portuguese';
+  }
+
+  const lexicalHints: Array<{ lang: string; tokens: string[] }> = [
+    { lang: 'Tamil', tokens: ['vanakkam', 'enna', 'epdi', 'eppadi', 'irukku', 'sollu', 'nandri', 'romba', 'theriyuma'] },
+    { lang: 'Hindi', tokens: ['namaste', 'kaise', 'kya', 'aap', 'hai', 'dhanyavaad', 'shukriya', 'mera', 'tum'] },
+    { lang: 'Telugu', tokens: ['ela', 'unnav', 'unnaru', 'nidra', 'nidhara', 'osthundi', 'osthundhi', 'cheppu', 'cheppandi', 'naaku'] },
+    { lang: 'Malayalam', tokens: ['sukhamano', 'ente', 'entha', 'parayu', 'nanni', 'ningal'] },
+    { lang: 'Kannada', tokens: ['namaskara', 'nimma', 'hesaru', 'hegidira', 'heli', 'tilisi', 'yenu'] },
+    { lang: 'Bengali', tokens: ['nomoskar', 'kemon', 'apnar', 'nam', 'bangla', 'dhonnobad', 'ki'] },
+    { lang: 'Marathi', tokens: ['namaskar', 'tumcha', 'naav', 'kay', 'kasa', 'aahes', 'baray'] },
+    { lang: 'Gujarati', tokens: ['kem', 'cho', 'tamaru', 'naam', 'shu', 'majama', 'saru'] },
+    { lang: 'Punjabi', tokens: ['sat', 'sri', 'akal', 'tuhada', 'naa', 'haal', 'ki'] },
+    { lang: 'Spanish', tokens: ['hola', 'gracias', 'como', 'estas', 'que', 'tal', 'por', 'favor'] },
+    { lang: 'French', tokens: ['bonjour', 'merci', 'comment', 'ca', 'va', 'choses', 'celebre', 'celebres', 'paris', 'france'] },
+    { lang: 'German', tokens: ['hallo', 'danke', 'wie', 'geht', 'es', 'bitte'] },
+    { lang: 'Portuguese', tokens: ['ola', 'obrigado', 'obrigada', 'como', 'vai', 'por', 'favor'] },
+  ];
+
+  let bestLang: string | null = null;
+  let bestScore = 0;
+  for (const hint of lexicalHints) {
+    const score = hint.tokens.reduce((count, token) => {
+      const tokenRegex = new RegExp(`\\b${token}\\b`, 'i');
+      return count + (tokenRegex.test(normalizedAscii) ? 1 : 0);
+    }, 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestLang = hint.lang;
+    }
+  }
+
+  if (bestLang && bestScore >= 2) {
+    return bestLang;
+  }
+
+  return null;
+}
+
+const SUPPORTED_RESPONSE_LANGUAGES = [
+  'English',
+  'Spanish',
+  'French',
+  'German',
+  'Chinese',
+  'Japanese',
+  'Hindi',
+  'Portuguese',
+  'Tamil',
+  'Telugu',
+  'Malayalam',
+  'Kannada',
+  'Bengali',
+  'Marathi',
+  'Gujarati',
+  'Punjabi',
+] as const;
+
+function normalizeLanguageCandidate(value: string): string | null {
+  if (!value) return null;
+  const cleaned = value.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    english: 'English',
+    spanish: 'Spanish',
+    espanol: 'Spanish',
+    'español': 'Spanish',
+    french: 'French',
+    francais: 'French',
+    'français': 'French',
+    german: 'German',
+    deutsch: 'German',
+    chinese: 'Chinese',
+    mandarin: 'Chinese',
+    japanese: 'Japanese',
+    hindi: 'Hindi',
+    portuguese: 'Portuguese',
+    portugues: 'Portuguese',
+    'português': 'Portuguese',
+    tamil: 'Tamil',
+    telugu: 'Telugu',
+    malayalam: 'Malayalam',
+    kannada: 'Kannada',
+    bengali: 'Bengali',
+    bangla: 'Bengali',
+    marathi: 'Marathi',
+    gujarati: 'Gujarati',
+    punjabi: 'Punjabi',
+  };
+  const mapped = aliases[cleaned];
+  return mapped && SUPPORTED_RESPONSE_LANGUAGES.includes(mapped as (typeof SUPPORTED_RESPONSE_LANGUAGES)[number])
+    ? mapped
+    : null;
+}
+
+async function detectLanguageFromQueryWithLLM(query: string): Promise<string | null> {
+  if (!query || query.trim().length < 2) return null;
+
+  const allowed = SUPPORTED_RESPONSE_LANGUAGES.join(', ');
+  const classifierPrompt = `Classify the user's intended response language from this query. The query may be transliterated (Latin script) or mixed-language. Return ONLY one language from this list: ${allowed}. If unclear, return English. Query: ${query}`;
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: classifierPrompt }] }],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 10,
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const normalized = normalizeLanguageCandidate(String(text).split(/\s|[.,;:!?]/)[0] || String(text));
+        if (normalized) return normalized;
+      }
+    } catch {
+      // ignore and fallback
+    }
+  }
+
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${openaiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0,
+          max_tokens: 8,
+          messages: [
+            { role: 'system', content: `You are a language classifier. Return ONLY one language name from: ${allowed}.` },
+            { role: 'user', content: classifierPrompt },
+          ],
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content || '';
+        const normalized = normalizeLanguageCandidate(String(text).split(/\s|[.,;:!?]/)[0] || String(text));
+        if (normalized) return normalized;
+      }
+    } catch {
+      // ignore and fallback
+    }
+  }
+
+  return null;
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -475,12 +794,18 @@ export async function POST(req: Request) {
     const resolvedNarrationTime = Number.isFinite(parsedNarrationTime)
       ? parsedNarrationTime
       : 1.5;
+    const detectedLanguage = detectLanguageFromQuery(String(query || ''));
+    const llmDetectedLanguage = detectedLanguage
+      ? null
+      : await detectLanguageFromQueryWithLLM(String(query || ''));
+    const effectiveLanguage = detectedLanguage || llmDetectedLanguage || language || 'English';
 
     // Fast path: day-of-week queries should always be concise in every language
     if (isDayOfWeekQuery(query)) {
-      const dayLine = formatDayOfWeekResponse(language || 'English', new Date());
+      const dayLine = formatDayOfWeekResponse(effectiveLanguage, new Date());
       return NextResponse.json({
         narration: dayLine,
+        languageUsed: effectiveLanguage,
         referencesHtml: undefined,
         modelUsed: 'gemini',
         tokenUsage: {
@@ -599,10 +924,11 @@ export async function POST(req: Request) {
     // Save extracted profile to database if user is authenticated
     // Check if ANY profile field was extracted
     const hasNewProfileData = 
-      (extractedProfile?.location && extractedProfile.location !== userContext?.profile?.location) ||
-      (extractedProfile?.age && extractedProfile.age !== userContext?.profile?.age) ||
-      (extractedProfile?.pulse && extractedProfile.pulse !== userContext?.profile?.pulse) ||
-      (extractedProfile?.bio && extractedProfile.bio !== userContext?.profile?.bio);
+      (extractedProfile?.location && extractedProfile.location !== mergedProfile?.location) ||
+      (extractedProfile?.age && extractedProfile.age !== mergedProfile?.age) ||
+      (extractedProfile?.interests && extractedProfile.interests !== mergedProfile?.interests) ||
+      (extractedProfile?.pulse && extractedProfile.pulse !== mergedProfile?.pulse) ||
+      (extractedProfile?.bio && extractedProfile.bio !== mergedProfile?.bio);
     
     if (hasNewProfileData) {
       try {
@@ -627,6 +953,11 @@ export async function POST(req: Request) {
             if (extractedProfile?.age) {
               updateData.age = extractedProfile.age;
               createData.age = extractedProfile.age;
+            }
+
+            if (extractedProfile?.interests) {
+              updateData.interests = extractedProfile.interests;
+              createData.interests = extractedProfile.interests;
             }
             
             if (extractedProfile?.pulse) {
@@ -662,6 +993,7 @@ export async function POST(req: Request) {
       },
       recentQueries: userContext?.recentQueries || [],
       learningHistory: userContext?.learningHistory || [],
+      attachments: userContext?.attachments || [],
     };
 
     // ========================================================================
@@ -702,7 +1034,7 @@ export async function POST(req: Request) {
         energy: userMindContext.mood.energy,
       } : undefined,
       chatHistory: mergedChatHistory,
-      language,
+      language: effectiveLanguage,
       narrationType,
       interactionMode,
       targetProvider: routingDecision.provider,
@@ -725,7 +1057,7 @@ export async function POST(req: Request) {
     const adapterOptions: AdapterOptions = {
       narrationTime: resolvedNarrationTime,
       narrationType,
-      language,
+      language: effectiveLanguage,
       interactionMode,
       selectedModel: resolvedSelection.model,
     };
@@ -733,11 +1065,23 @@ export async function POST(req: Request) {
     const middlewareOptions = {
       narrationTime: resolvedNarrationTime,
       narrationType,
-      language,
+      language: effectiveLanguage,
       interactionMode,
       enableWebSearch: finalEnableWebSearch,
       userContext: userMindContext,
       chatHistory: mergedChatHistory,
+    };
+
+    const failedModels = new Set<string>();
+    const shouldDisableByError = (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error || '');
+      return /(insufficient|quota|rate\s*limit|429|billing|api\s*key|unauthorized|forbidden|service unavailable|timeout|timed out|502|503|504|api error)/i.test(message);
+    };
+    const trackModelFailure = (model: string, error: unknown) => {
+      if (!model || model === 'auto') return;
+      if (shouldDisableByError(error)) {
+        failedModels.add(model);
+      }
     };
 
     // ========================================================================
@@ -758,6 +1102,7 @@ export async function POST(req: Request) {
     } catch (primaryError) {
       // Primary adapter failed — try alternatives from the routing decision
       console.warn(`⚠️ Primary adapter (${resolvedSelection.provider}/${resolvedSelection.model}) failed:`, primaryError);
+      trackModelFailure(resolvedSelection.model, primaryError);
 
       let fallbackSucceeded = false;
       for (const alt of routingDecision.alternatives) {
@@ -782,13 +1127,14 @@ export async function POST(req: Request) {
           break;
         } catch (fallbackError) {
           console.warn(`⚠️ Fallback ${alt.displayName} also failed:`, fallbackError);
+          trackModelFailure(alt.model, fallbackError);
         }
       }
 
       if (!fallbackSucceeded) {
         console.error('❌ All AI adapters failed');
         return NextResponse.json(
-          { error: "All AI models failed to generate a response" },
+          { error: "All AI models failed to generate a response", failedModels: Array.from(failedModels) },
           { status: 503 }
         );
       }
@@ -876,6 +1222,7 @@ export async function POST(req: Request) {
     // ========================================================================
     return NextResponse.json({
       narration: enhancedResponse.narration,
+      languageUsed: effectiveLanguage,
       referencesHtml: enhancedResponse.referencesHtml,
       modelUsed: modelName,
       webSources: enhancedResponse.webSources,
@@ -887,6 +1234,7 @@ export async function POST(req: Request) {
         estimatedCost: estimatedCostUsd,
       },
       tokenBudgetExceeded,
+      failedModels: Array.from(failedModels),
       metadata: {
         ...enhancedResponse.metadata,
         // Smart routing metadata

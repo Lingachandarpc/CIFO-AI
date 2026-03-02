@@ -70,7 +70,7 @@ export enum Genre {
 }
 
 export interface Settings {
-  narrationType: "Realistic" | "Dramatic" | "Educational";
+  narrationType: "Realistic" | "Dramatic" | "Educational" | "Personalized";
   voiceType: string;
   voiceGender: VoiceGender;
   language: Language;
@@ -106,6 +106,12 @@ export interface ChatMessage {
   dashboard?: {
     url: string;
     title?: string;
+    summary?: string;
+  };
+  document?: {
+    url: string;
+    fileName?: string;
+    mimeType?: string;
     summary?: string;
   };
   attachments?: Array<{
@@ -151,6 +157,12 @@ export interface HistoryConversationEntry {
     title?: string;
     summary?: string;
   };
+  document?: {
+    url: string;
+    fileName?: string;
+    mimeType?: string;
+    summary?: string;
+  };
   modelUsed?: AIModel;
   referencesHtml?: string;
 }
@@ -161,6 +173,7 @@ export interface HistoryItem {
   mode: SearchMode;
   timestamp: Date;
   interactionMode: "read" | "listen";
+  toolTag?: "OCR";
   response?: string;
   audioBlob?: string;
   genre?: string;

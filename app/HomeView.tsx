@@ -9,7 +9,7 @@ import { SearchMode, Settings, ChatMessage, HistoryItem, HistoryConversationEntr
 import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon, VolumeIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
 import SearchBar, { type AttachedFile } from '../components/SearchBar';
-import { generateNarrative, generateSpeech, decodeAudio, getAudioBuffer, generateSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus, generateToolDocument, generateToolDashboard } from './services/openaiService';
+import { generateNarrative, generateSpeechDetailed, decodeAudio, getAudioBuffer, generateSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus, generateToolDocument, generateToolDashboard, generateToolOCR, type TtsAudioPayload } from './services/openaiService';
 import MediaEditorDialog from '../components/MediaEditorDialog';
 import DashboardDialog from '../components/DashboardDialog';
 import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
@@ -144,6 +144,7 @@ export default function HomeView() {
   const [inputValue, setInputValue] = useState('');
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState('auto');
+  const [disabledModelIds, setDisabledModelIds] = useState<string[]>([]);
   const [mediaDialog, setMediaDialog] = useState<MediaDialogState | null>(null);
   const [dashboardDialog, setDashboardDialog] = useState<DashboardDialogState | null>(null);
   const [isMediaRegenerating, setIsMediaRegenerating] = useState(false);
@@ -195,14 +196,17 @@ export default function HomeView() {
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [completedTypewriterMap, setCompletedTypewriterMap] = useState<Record<string, boolean>>({});
   const [typewriterState, setTypewriterState] = useState<{ messageId: string | null; text: string }>({ messageId: null, text: '' });
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const readScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const userMessageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const assistantContentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const pendingScrollUserIdRef = useRef<string | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const typewriterFrameRef = useRef<number | null>(null);
   const activeTypewriterMessageRef = useRef<string | null>(null);
+  const copyFeedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const TYPEWRITER_CHARS_PER_SECOND = 250; // Increased for faster typing effect
   const getHistoryStorageKey = (id: number | null) =>
@@ -240,6 +244,14 @@ export default function HomeView() {
     }
   }, [interactionMode, isNarrating]);
 
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
   interface SpeechRecognitionLike {
     continuous?: boolean;
     interimResults?: boolean;
@@ -269,6 +281,8 @@ export default function HomeView() {
   const lastListenQueryRef = useRef<string>('');
   const activeListenSessionIdRef = useRef<string | null>(null);
   const activeReadSessionIdRef = useRef<string | null>(null);
+  const activeLanguageRef = useRef<Language>(Language.ENGLISH);
+  const activeNarrationTypeRef = useRef<Settings['narrationType']>('Realistic');
   const lastMicInterruptAtRef = useRef<number>(0);
   const lastListenTranscriptRef = useRef<string>('');
   const lastListenTranscriptAtRef = useRef<number>(0);
@@ -292,6 +306,12 @@ export default function HomeView() {
     
     return filtered;
   }, [history, historyTab]);
+
+  const getHistoryBadgeLabel = (item: HistoryItem) => {
+    if (item.interactionMode === 'listen') return 'Listen';
+    if (item.toolTag === 'OCR') return 'OCR';
+    return 'Read';
+  };
 
   // ============================================================================
   // CLEANUP: Stop narration when component unmounts or window closes
@@ -626,7 +646,7 @@ export default function HomeView() {
   };
 
   const setRecognitionLanguage = () => {
-    setRecognitionLanguageFor(settings.language);
+    setRecognitionLanguageFor(activeLanguageRef.current || Language.ENGLISH);
   };
 
   const toggleMic = () => {
@@ -746,8 +766,246 @@ export default function HomeView() {
 
   const inferLanguageFromTranscript = (text: string): Language | null => {
     if (!text) return null;
+    const normalized = text.toLowerCase().trim();
+    const normalizedAscii = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
     if (/[\u0B80-\u0BFF]/.test(text)) return Language.TAMIL;
+    if (/[\u0C00-\u0C7F]/.test(text)) return Language.TELUGU;
+    if (/[\u0900-\u097F]/.test(text)) return Language.HINDI;
+    if (/[\u0980-\u09FF]/.test(text)) return Language.BENGALI;
+    if (/[\u0D00-\u0D7F]/.test(text)) return Language.MALAYALAM;
+    if (/[\u0C80-\u0CFF]/.test(text)) return Language.KANNADA;
+    if (/[\u4E00-\u9FFF]/.test(text)) return Language.CHINESE;
+    if (/[\u3040-\u30FF]/.test(text)) return Language.JAPANESE;
+
+    const tamilRomanPatterns = [
+      /\bun\s+per\s+enna\b/i,
+      /\bunga\s+per\s+enna\b/i,
+      /\bun\s+peru\s+enna\b/i,
+      /\benna\s+peru\b/i,
+      /\benna\b/i,
+      /\byaar\b/i,
+      /\bthalaivar\b/i,
+      /\bavar\b|\bavaru\b|\bavaru\b|\bavanga\b|\bavarukku\b/i,
+      /\benna\s+aachi\b|\benna\s+achu\b|\benna\s+aachu\b/i,
+      /\bvanakkam\b/i,
+      /\bnandri\b/i,
+      /\banna\b|\bakka\b|\bthambi\b/i,
+      /\bepdi\b|\beppadi\b/i,
+      /\birukku\b|\biruka\b|\birukka\b|\birukkaa\b/i,
+      /\benga\b|\benge\b|\binge\b|\binga\b/i,
+      /\bsollu\b|\bsolunga\b|\bsolra\b/i,
+      /\btheriyuma\b|\btheriyala\b/i,
+      /\bpakkalam\b|\bpaakalam\b|\bparpom\b/i,
+      /\btamil\s*(la|il|mozhi|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+tamil\b/i,
+      /\bsaptiya\b|\bsaaptiya\b/i,
+      /\bromba\b/i,
+      /\btamil\b/i,
+    ];
+    if (tamilRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.TAMIL;
+    }
+
+    const hindiRomanPatterns = [
+      /\bnamaste\b/i,
+      /\bkaise\s+ho\b/i,
+      /\baap\s+ka\s+naam\s+kya\b/i,
+      /\bkya\s+haal\s+hai\b/i,
+      /\bdhanyavaad\b|\bshukriya\b/i,
+      /\b(in|reply in|answer in|speak in)\s+hindi\b/i,
+      /\bhindi\s*(me|mein|language)\b/i,
+    ];
+    if (hindiRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.HINDI;
+    }
+
+    const teluguRomanPatterns = [
+      /\bmee\s+peru\s+enti\b|\bmeeku\s+peru\s+enti\b/i,
+      /\bela\s+unnav\b|\bela\s+unnaru\b/i,
+      /\bem\s+jarigindi\b/i,
+      /\bnidra\b|\bnidhra\b|\bnidhara\b/i,
+      /\bosthundi\b|\bosthundhi\b|\bvasthundi\b|\bvastundi\b/i,
+      /\bnidra\s+osthundi\b|\bnidhara\s+osthundhi\b/i,
+      /\bcheppandi\b|\bcheppu\b/i,
+      /\btelugu\s*(lo|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+telugu\b/i,
+    ];
+    if (teluguRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.TELUGU;
+    }
+
+    const malayalamRomanPatterns = [
+      /\bente\s+peru\b/i,
+      /\bsukhamano\b|\bningal\s+sukhamano\b/i,
+      /\benthaanu\b|\bentha\b/i,
+      /\bparayu\b/i,
+      /\bmalayalam\s*(il|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+malayalam\b/i,
+    ];
+    if (malayalamRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.MALAYALAM;
+    }
+
+    const kannadaRomanPatterns = [
+      /\bnamaskara\b/i,
+      /\bnimma\s+hesaru\s+yenu\b/i,
+      /\bhegiddira\b|\bhegiddiya\b/i,
+      /\bheli\b|\btilisi\b/i,
+      /\bkannada\s*(dalli|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+kannada\b/i,
+    ];
+    if (kannadaRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.KANNADA;
+    }
+
+    const bengaliRomanPatterns = [
+      /\bnomoskar\b|\bnomoshkar\b/i,
+      /\bapnar\s+nam\s+ki\b/i,
+      /\bkemon\s+acho\b|\bkemon\s+achen\b/i,
+      /\bki\s+hoyeche\b/i,
+      /\bbangla\b|\bbengali\s*(te|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+bengali\b/i,
+    ];
+    if (bengaliRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.BENGALI;
+    }
+
+    const marathiRomanPatterns = [
+      /\bnamaskar\b/i,
+      /\btumcha\s+naav\s+kay\b/i,
+      /\bkasa\s+ahes\b|\bkashi\s+ahes\b|\bkase\s+aahat\b/i,
+      /\bkay\s+zala\b/i,
+      /\bmarathi\s*(madhe|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+marathi\b/i,
+    ];
+    if (marathiRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.MARATHI;
+    }
+
+    const gujaratiRomanPatterns = [
+      /\bkem\s+cho\b/i,
+      /\btamaru\s+naam\s+shu\b/i,
+      /\bsaru\s+che\b/i,
+      /\bgujarati\s*(ma|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+gujarati\b/i,
+    ];
+    if (gujaratiRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.GUJARATI;
+    }
+
+    const punjabiRomanPatterns = [
+      /\bsat\s+sri\s+akal\b/i,
+      /\btuhada\s+naa[mn]\s+ki\b/i,
+      /\bki\s+haal\s+aa\b/i,
+      /\bpunjabi\s*(vich|language)\b/i,
+      /\b(in|reply in|answer in|speak in)\s+punjabi\b/i,
+    ];
+    if (punjabiRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.PUNJABI;
+    }
+
+    const spanishRomanPatterns = [
+      /\bhola\b|\bcomo\s+estas\b|\bque\s+tal\b|\bgracias\b/i,
+      /\bespanol\b|\bespañol\b/i,
+      /\b(in|reply in|answer in|speak in)\s+spanish\b/i,
+    ];
+    if (spanishRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.SPANISH;
+    }
+
+    const frenchRomanPatterns = [
+      /\bbonjour\b|\bcomment\s+ca\s+va\b|\bmerci\b/i,
+      /\bfrancais\b|\bfrançais\b/i,
+      /\bchoses\b|\bcelebre\b|\bcelebres\b|\bparis\b|\bfrance\b/i,
+      /\b(in|reply in|answer in|speak in)\s+french\b/i,
+    ];
+    if (frenchRomanPatterns.some((pattern) => pattern.test(normalizedAscii))) {
+      return Language.FRENCH;
+    }
+
+    const germanRomanPatterns = [
+      /\bhallo\b|\bwie\s+geht\s+es\b|\bdanke\b/i,
+      /\bdeutsch\b/i,
+      /\b(in|reply in|answer in|speak in)\s+german\b/i,
+    ];
+    if (germanRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.GERMAN;
+    }
+
+    const portugueseRomanPatterns = [
+      /\bola\b|\bcomo\s+vai\b|\bobrigado\b|\bobrigada\b/i,
+      /\bportugues\b|\bportuguês\b/i,
+      /\b(in|reply in|answer in|speak in)\s+portuguese\b/i,
+    ];
+    if (portugueseRomanPatterns.some((pattern) => pattern.test(normalized))) {
+      return Language.PORTUGUESE;
+    }
+
+    const lexicalHints: Array<{ language: Language; tokens: string[] }> = [
+      { language: Language.TAMIL, tokens: ['vanakkam', 'enna', 'epdi', 'eppadi', 'irukku', 'sollu', 'nandri', 'romba', 'theriyuma'] },
+      { language: Language.HINDI, tokens: ['namaste', 'kaise', 'kya', 'aap', 'hai', 'dhanyavaad', 'shukriya', 'mera', 'tum'] },
+      { language: Language.TELUGU, tokens: ['ela', 'unnav', 'unnaru', 'nidra', 'nidhara', 'osthundi', 'osthundhi', 'cheppu', 'cheppandi', 'naaku'] },
+      { language: Language.MALAYALAM, tokens: ['sukhamano', 'ente', 'entha', 'parayu', 'nanni', 'ningal'] },
+      { language: Language.KANNADA, tokens: ['namaskara', 'nimma', 'hesaru', 'hegidira', 'heli', 'tilisi', 'yenu'] },
+      { language: Language.BENGALI, tokens: ['nomoskar', 'kemon', 'apnar', 'nam', 'bangla', 'dhonnobad', 'ki'] },
+      { language: Language.MARATHI, tokens: ['namaskar', 'tumcha', 'naav', 'kay', 'kasa', 'aahes', 'baray'] },
+      { language: Language.GUJARATI, tokens: ['kem', 'cho', 'tamaru', 'naam', 'shu', 'majama', 'saru'] },
+      { language: Language.PUNJABI, tokens: ['sat', 'sri', 'akal', 'tuhada', 'naa', 'haal', 'ki'] },
+      { language: Language.SPANISH, tokens: ['hola', 'gracias', 'como', 'estas', 'que', 'tal', 'por', 'favor'] },
+      { language: Language.FRENCH, tokens: ['bonjour', 'merci', 'comment', 'ca', 'va', 'choses', 'celebre', 'celebres', 'paris', 'france'] },
+      { language: Language.GERMAN, tokens: ['hallo', 'danke', 'wie', 'geht', 'es', 'bitte'] },
+      { language: Language.PORTUGUESE, tokens: ['ola', 'obrigado', 'obrigada', 'como', 'vai', 'por', 'favor'] },
+    ];
+
+    let bestLanguage: Language | null = null;
+    let bestScore = 0;
+    for (const hint of lexicalHints) {
+      const score = hint.tokens.reduce((count, token) => {
+        const tokenRegex = new RegExp(`\\b${token}\\b`, 'i');
+        return count + (tokenRegex.test(normalizedAscii) ? 1 : 0);
+      }, 0);
+      if (score > bestScore) {
+        bestScore = score;
+        bestLanguage = hint.language;
+      }
+    }
+
+    if (bestLanguage && bestScore >= 2) {
+      return bestLanguage;
+    }
+
     return null;
+  };
+
+  const inferNarrationPersonaFromRequest = (text: string): Settings['narrationType'] => {
+    const normalized = (text || '').toLowerCase();
+    if (/\b(personalized|personalise|personalize|my profile|based on my profile|for me personally)\b/.test(normalized)) {
+      return 'Personalized';
+    }
+    if (/\b(explain|teach|learning|learn|steps?|guide|tutorial|definition|overview)\b/.test(normalized)) {
+      return 'Educational';
+    }
+    if (/\b(story|narrate|dramatic|emotion|cinematic|thriller|poem|dialogue|roleplay)\b/.test(normalized)) {
+      return 'Dramatic';
+    }
+    return 'Realistic';
+  };
+
+  const syncDetectedLanguageAndPersona = (language: Language, requestText: string) => {
+    const inferredPersona = inferNarrationPersonaFromRequest(requestText);
+    activeNarrationTypeRef.current = settings.narrationType === 'Personalized' ? 'Personalized' : inferredPersona;
+    setSettings((prev) => {
+      const nextPersona = prev.narrationType === 'Personalized' ? 'Personalized' : inferredPersona;
+      if (prev.language === language && prev.narrationType === nextPersona) {
+        return prev;
+      }
+      return {
+        ...prev,
+        language,
+        narrationType: nextPersona,
+      };
+    });
   };
 
   const cleanTextForTts = (raw: string) => {
@@ -777,6 +1035,34 @@ export default function HomeView() {
     return text;
   };
 
+  const detectAudioMimeType = (base64: string): string => {
+    const normalized = (base64 || '').trim();
+    const dataUrlMatch = normalized.match(/^data:([^;]+);base64,/i);
+    if (dataUrlMatch?.[1]) return dataUrlMatch[1];
+
+    try {
+      const clean = normalized.replace(/^data:[^;]+;base64,/i, '').replace(/\s+/g, '');
+      if (!clean) return 'audio/mpeg';
+      const headerBytes = decodeAudio(clean).slice(0, 16);
+      if (headerBytes.length >= 4) {
+        const headerAscii = String.fromCharCode(...headerBytes.slice(0, 4));
+        if (headerAscii === 'RIFF') return 'audio/wav';
+        if (headerAscii === 'OggS') return 'audio/ogg';
+      }
+      if (headerBytes.length >= 3) {
+        const id3 = String.fromCharCode(...headerBytes.slice(0, 3));
+        if (id3 === 'ID3') return 'audio/mpeg';
+      }
+      if (headerBytes.length >= 2 && headerBytes[0] === 0xff && (headerBytes[1] & 0xe0) === 0xe0) {
+        return 'audio/mpeg';
+      }
+    } catch {
+      // ignore parse errors and use default
+    }
+
+    return 'audio/mpeg';
+  };
+
   const getTtsExcerpt = (text: string, mode: "read" | "listen") => {
     const cleaned = cleanTextForTts(text);
     const baseText = cleaned || text;
@@ -803,14 +1089,20 @@ export default function HomeView() {
   const getNarrationStyleRate = (style: Settings["narrationType"]) => {
     if (style === "Dramatic") return 0.95;
     if (style === "Educational") return 0.98;
+    if (style === "Personalized") return 1.0;
     return 1.0;
   };
 
   const getNarrationStylePitch = (style: Settings["narrationType"]) => {
     if (style === "Dramatic") return -2;
     if (style === "Educational") return 0;
+    if (style === "Personalized") return -1;
     return -1;
   };
+
+  useEffect(() => {
+    activeNarrationTypeRef.current = settings.narrationType;
+  }, [settings.narrationType]);
 
   const dedupeHistory = (items: HistoryItem[]) => {
     const seen = new Set<string>();
@@ -1196,7 +1488,8 @@ export default function HomeView() {
 
     // Fallback: HTML5 Audio element
     try {
-      const audio = new Audio(`data:audio/wav;base64,${base64}`);
+      const mimeType = detectAudioMimeType(base64);
+      const audio = new Audio(`data:${mimeType};base64,${base64}`);
       onStarted();
       audio.onended = onEnded;
       audio.onerror = () => { onEnded(); };
@@ -1226,7 +1519,7 @@ export default function HomeView() {
     return chunks.length ? chunks : [value];
   };
 
-  const playAudioChunk = async (base64: string) => {
+  const playAudioChunk = async (base64: string, mimeType?: string) => {
     initAudio();
 
     // Try Web Audio API first (supports analyser for visualisation)
@@ -1272,7 +1565,8 @@ export default function HomeView() {
     // Fallback: HTML5 Audio element — works when decodeAudioData fails
     await new Promise<void>((resolve, reject) => {
       try {
-        const audio = new Audio(`data:audio/wav;base64,${base64}`);
+        const resolvedMimeType = mimeType || detectAudioMimeType(base64);
+        const audio = new Audio(`data:${resolvedMimeType};base64,${base64}`);
         audio.onended = () => resolve();
         audio.onerror = (e) => {
           console.error('HTML5 Audio fallback also failed:', e);
@@ -1316,16 +1610,16 @@ export default function HomeView() {
     try {
       for (const chunk of chunks) {
         if (ttsSessionRef.current !== sessionId) return 'canceled';
-        let audioBase64 = '';
+        let audioPayload: TtsAudioPayload = { audio: '', mimeType: 'audio/mpeg' };
         try {
-          audioBase64 = await withTimeout(generateNarrationAudio(chunk, voiceProfile), chunkTimeoutMs);
+          audioPayload = await withTimeout(generateNarrationAudio(chunk, voiceProfile), chunkTimeoutMs);
         } catch (error) {
           if (error instanceof Error && error.message === 'TTS timeout') {
             return 'timeout';
           }
           throw error;
         }
-        if (!audioBase64) throw new Error('Empty TTS audio chunk');
+        if (!audioPayload.audio) throw new Error('Empty TTS audio chunk');
         if (!hasStartedNarration) {
           hasStartedNarration = true;
           options?.onStart?.();
@@ -1335,7 +1629,7 @@ export default function HomeView() {
             startAmbientMusic(options.genre || null);
           }
         }
-        await playAudioChunk(audioBase64);
+        await playAudioChunk(audioPayload.audio, audioPayload.mimeType);
       }
     } catch (error) {
       console.error('Chunked TTS failed:', error);
@@ -1390,10 +1684,11 @@ export default function HomeView() {
     return [TextToSpeechProvider.GEMINI, TextToSpeechProvider.ELEVENLABS, TextToSpeechProvider.GOOGLE];
   };
 
-  const generateNarrationAudio = async (text: string, voiceProfile?: VoiceProfile): Promise<string> => {
-    const effectiveNarrationType = toVoiceNarrationType(voiceProfile, settings.narrationType);
+  const generateNarrationAudio = async (text: string, voiceProfile?: VoiceProfile): Promise<TtsAudioPayload> => {
+    const narrationLanguage = activeLanguageRef.current || Language.ENGLISH;
+    const effectiveNarrationType = toVoiceNarrationType(voiceProfile, activeNarrationTypeRef.current || settings.narrationType);
     const providerOrder = getTtsProviderOrder(settings.ttsProvider);
-    const googleLanguageCode = getGoogleLanguageCode(settings.language);
+    const googleLanguageCode = getGoogleLanguageCode(narrationLanguage);
     const baseRate = getNarrationStyleRate(effectiveNarrationType);
     const paceMultiplier = voiceProfile?.pace === 'fast' ? 1.12 : voiceProfile?.pace === 'slow' ? 0.92 : 1.0;
     const slangMultiplier = voiceProfile?.slang === 'moderate' ? 1.04 : voiceProfile?.slang === 'light' ? 1.02 : 1.0;
@@ -1406,7 +1701,7 @@ export default function HomeView() {
       resolvedGoogleVoice?.name ||
       (settings.voiceType?.startsWith(googleLanguageCode) ? settings.voiceType : `${googleLanguageCode}-Standard-A`) ||
       DEFAULT_GOOGLE_VOICE;
-    const googleRate = settings.language === Language.ENGLISH
+    const googleRate = narrationLanguage === Language.ENGLISH
       ? paceRate
       : Math.max(0.7, Math.min(1.1, paceRate * 0.9));
 
@@ -1416,10 +1711,10 @@ export default function HomeView() {
           const geminiAudio = await generateSpeechWithGemini(
             text,
             settings.voiceType,
-            settings.language,
+            narrationLanguage,
             settings.voiceGender
           );
-          if (geminiAudio) return geminiAudio;
+          if (geminiAudio.audio) return { audio: geminiAudio.audio, mimeType: geminiAudio.mimeType || 'audio/wav' };
         } catch (error) {
           console.warn('Gemini TTS failed:', error);
         }
@@ -1434,7 +1729,7 @@ export default function HomeView() {
             googleRate,
             pitchValue
           );
-          if (googleAudio) return googleAudio;
+          if (googleAudio.audio) return { audio: googleAudio.audio, mimeType: googleAudio.mimeType || 'audio/mpeg' };
         } catch (error) {
           console.warn('Google TTS failed:', error);
         }
@@ -1445,11 +1740,11 @@ export default function HomeView() {
           const elevenLabsAudio = await generateSpeechWithElevenLabs(
             text,
             settings.voiceType,
-            settings.language,
+            narrationLanguage,
             effectiveNarrationType,
             settings.voiceGender
           );
-          if (elevenLabsAudio) return elevenLabsAudio;
+          if (elevenLabsAudio.audio) return { audio: elevenLabsAudio.audio, mimeType: elevenLabsAudio.mimeType || 'audio/mpeg' };
         } catch (error) {
           console.warn('ElevenLabs TTS failed:', error);
         }
@@ -1457,15 +1752,15 @@ export default function HomeView() {
 
       if (provider === TextToSpeechProvider.OPENAI) {
         try {
-          const openAIAudio = await generateSpeech(text, settings.voiceType, settings.language);
-          if (openAIAudio) return openAIAudio;
+          const openAIAudio = await generateSpeechDetailed(text, settings.voiceType, narrationLanguage);
+          if (openAIAudio.audio) return { audio: openAIAudio.audio, mimeType: openAIAudio.mimeType || 'audio/mpeg' };
         } catch (error) {
           console.warn('OpenAI TTS failed:', error);
         }
       }
     }
 
-    return '';
+    return { audio: '', mimeType: 'audio/mpeg' };
   };
 
   const playBrowserTTS = (
@@ -1505,6 +1800,7 @@ export default function HomeView() {
     };
 
     const effectiveNarrationType = toVoiceNarrationType(options?.voiceProfile, settings.narrationType);
+    activeNarrationTypeRef.current = effectiveNarrationType;
     const baseRate = getNarrationStyleRate(effectiveNarrationType);
     const paceMultiplier = options?.voiceProfile?.pace === 'fast' ? 1.12 : options?.voiceProfile?.pace === 'slow' ? 0.92 : 1.0;
     const slangMultiplier = options?.voiceProfile?.slang === 'moderate' ? 1.04 : options?.voiceProfile?.slang === 'light' ? 1.02 : 1.0;
@@ -1514,7 +1810,7 @@ export default function HomeView() {
     const computedPitch = Math.max(0.6, Math.min(1.4, 1 + (basePitch + profilePitch) / 10));
 
     const chunks = splitTextForTts(text, 1200);
-    const lang = languageMap[settings.language] || 'en-US';
+    const lang = languageMap[activeLanguageRef.current || Language.ENGLISH] || 'en-US';
     let chunkIndex = 0;
     let started = false;
     let hasStartedNarration = false;
@@ -1691,6 +1987,21 @@ export default function HomeView() {
     return Math.round(value);
   };
 
+  const buildDocumentTitle = (query: string): string => {
+    const normalized = (query || '')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!normalized) return 'Research Report';
+
+    const withoutTrailingPunctuation = normalized.replace(/[,:;\-–—]+$/g, '').trim();
+    const words = withoutTrailingPunctuation.split(' ').filter(Boolean).slice(0, 12);
+    const compactTitle = words.join(' ').trim();
+
+    return (compactTitle || 'Research Report').slice(0, 72);
+  };
+
   const decodeAttachmentText = (file: { name: string; base64?: string }): string | null => {
     if (!file.base64) return null;
     const lowerName = file.name.toLowerCase();
@@ -1737,8 +2048,7 @@ export default function HomeView() {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 15000);
-      return { downloaded: true };
+      return { viewUrl: objectUrl, downloaded: true };
     } catch {
       const anchor = document.createElement('a');
       anchor.href = `data:${mimeType};base64,${base64Data}`;
@@ -1746,7 +2056,7 @@ export default function HomeView() {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      return { downloaded: true };
+      return { viewUrl: anchor.href, downloaded: true };
     }
   };
 
@@ -1799,6 +2109,345 @@ export default function HomeView() {
       .replace(/\r\n/g, '\n');
 
     return withoutMetadata.trim();
+  };
+
+  const isEditableCanvasRequested = (query: string) => {
+    const normalized = query.toLowerCase();
+    return /(editable\s+canvas|digital\s+note\s+canvas|canvas\s+json|canvas\s+block|in\s+canvas\s+format|use\s+canvas\s+format)/.test(normalized);
+  };
+
+  const isStructuredOcrOutputRequested = (query: string) => {
+    const normalized = (query || '').toLowerCase();
+    return /(digital\s+note|notes?|summari[sz]e|explain|structured|format|clean\s+up|table|diagram|flowchart|mind\s*map|editable|canvas)/.test(normalized);
+  };
+
+  const extractCopyReadyText = (raw: string) => {
+    const source = sanitizeNarrationForDisplay(raw);
+
+    const maybeJsonPayload = source.trim();
+    if (maybeJsonPayload.startsWith('{') && maybeJsonPayload.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(maybeJsonPayload) as { content?: string };
+        if (typeof parsed?.content === 'string' && parsed.content.trim()) {
+          return parsed.content.trim();
+        }
+      } catch {
+      }
+    }
+
+    const canvasUnwrapped = source.replace(/```canvas\s*([\s\S]*?)```/gi, (_, block: string) => {
+      const text = block.trim();
+      if (!text) return '';
+      try {
+        const parsed = JSON.parse(text) as { content?: string };
+        return parsed?.content ? String(parsed.content) : text;
+      } catch {
+        return text;
+      }
+    });
+
+    return canvasUnwrapped
+      .replace(/```(?:diagram|mermaid|chart|json-chart|table|progress|tabs)?\s*([\s\S]*?)```/gi, '$1')
+      .replace(/^#{1,6}\s*/gm, '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/__(.*?)__/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/_(.*?)_/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+      .replace(/^\|(?:\s*[-:]+\s*\|)+\s*$/gm, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
+
+  const normalizeOcrDigitalNotes = (text: string) => {
+    const stripMarkdownAsterisks = (input: string) => {
+      return input
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/__(.*?)__/g, '$1')
+        .replace(/^\s*\*\s+/gm, '- ')
+        .replace(/^\s*\*\s*$/gm, '')
+        .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1$2');
+    };
+
+    const source = (text || '').trim();
+
+    if (source.startsWith('{') && source.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(source) as { content?: string };
+        if (typeof parsed?.content === 'string' && parsed.content.trim()) {
+          return stripMarkdownAsterisks(parsed.content)
+            .replace(/\r\n/g, '\n')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
+            .replace(/[ \t]{2,}/g, ' ')
+            .replace(/\n{4,}/g, '\n\n')
+            .trim();
+        }
+      } catch {
+      }
+    }
+
+    return stripMarkdownAsterisks(source)
+      .replace(/\r\n/g, '\n')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{4,}/g, '\n\n')
+      .trim();
+  };
+
+  const isUnavailableNarrative = (text: string) => {
+    const normalized = (text || '').trim().toLowerCase();
+    if (!normalized) return true;
+    return (
+      normalized === 'sorry — ai is unavailable right now.' ||
+      normalized === 'sorry - ai is unavailable right now.' ||
+      normalized.includes('all ai models failed to generate a response') ||
+      normalized.includes('api key not configured') ||
+      normalized.includes('service is unavailable right now')
+    );
+  };
+
+  const isOcrAssistantMessage = (msg: ChatMessage) => {
+    const normalized = msg.content.toLowerCase();
+    return (
+      normalized.includes('ocr completed') ||
+      normalized.startsWith('ocr failed') ||
+      normalized.includes('error while extracting text') ||
+      normalized.includes('ocr extraction')
+    );
+  };
+
+  const isDashboardSessionSuggestionMessage = (msg: ChatMessage) => {
+    if (msg.role !== 'assistant' || !!msg.dashboard) return false;
+    const normalized = (msg.content || '').toLowerCase();
+    return (
+      normalized.includes('dashboard session') ||
+      normalized.includes('ready to assist with dashboard creation') ||
+      normalized.includes('query presets you can use directly')
+    );
+  };
+
+  const dashboardChatSuggestionPills = useMemo(() => {
+    if (selectedTool !== 'dashboard') return [] as string[];
+
+    const latestDashboardUserQuery = [...messages]
+      .reverse()
+      .find((entry) => entry.role === 'user')?.content?.trim() || '';
+
+    const latestDashboardAssistantText = [...messages]
+      .reverse()
+      .find((entry) => entry.role === 'assistant')?.content?.trim() || '';
+
+    const queryLower = latestDashboardUserQuery.toLowerCase();
+    const assistantLower = latestDashboardAssistantText.toLowerCase();
+
+    const lastUserWithAttachments = [...messages]
+      .reverse()
+      .find((entry) => entry.role === 'user' && Array.isArray(entry.attachments) && entry.attachments.length > 0);
+
+    const attached = lastUserWithAttachments?.attachments || [];
+
+    const decodeTextHeaders = (file: { name: string; type: string; data?: string }): string[] => {
+      if (!file.data) return [];
+      const lowerName = file.name.toLowerCase();
+      const isCsvLike =
+        /\.csv$|\.txt$/.test(lowerName)
+        || /csv|text\//i.test(file.type || '');
+      if (!isCsvLike) return [];
+
+      try {
+        const binary = atob(file.data);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes).slice(0, 4000);
+        const firstDataLine = decoded
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find((line) => line.length > 0);
+        if (!firstDataLine) return [];
+        return firstDataLine
+          .split(',')
+          .map((cell) => cell.replace(/^"|"$/g, '').trim())
+          .filter(Boolean)
+          .slice(0, 8);
+      } catch {
+        return [];
+      }
+    };
+
+    const headerCandidates = attached.flatMap((file) => decodeTextHeaders(file));
+    const uniqueHeaders = headerCandidates.filter((header, index, list) => list.indexOf(header) === index);
+
+    const metricRegex = /(sales|revenue|amount|total|count|cost|price|profit|value|score|quantity|units?)/i;
+    const metricHeader = uniqueHeaders.find((header) => metricRegex.test(header));
+    const dimensionHeader = uniqueHeaders.find((header) => !metricRegex.test(header));
+    const secondDimensionHeader = uniqueHeaders.find((header) => header !== dimensionHeader && !metricRegex.test(header));
+
+    const stopWords = new Set([
+      'show', 'add', 'with', 'for', 'from', 'into', 'over', 'under', 'and', 'the', 'this', 'that',
+      'dashboard', 'table', 'chart', 'charts', 'kpi', 'cards', 'data', 'dataset', 'report', 'analysis',
+    ]);
+    const queryTokens = latestDashboardUserQuery
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 2 && !stopWords.has(token));
+
+    const inferredMetric = metricHeader || queryTokens.find((token) => metricRegex.test(token));
+    const inferredDimension = dimensionHeader || queryTokens.find((token) => token !== inferredMetric);
+
+    const hashSeed = (value: string): number => {
+      let hash = 0;
+      for (let index = 0; index < value.length; index += 1) {
+        hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+      }
+      return Math.abs(hash);
+    };
+
+    const pills: string[] = [];
+    const tablePills: string[] = [];
+    const chartPills: string[] = [];
+    const kpiPills: string[] = [];
+    const filterPills: string[] = [];
+    const layoutPills: string[] = [];
+
+    if (metricHeader && dimensionHeader) {
+      chartPills.push(`Show total ${metricHeader} by ${dimensionHeader}`);
+      chartPills.push(`Top 10 ${dimensionHeader} by ${metricHeader}`);
+      filterPills.push(`Add filter by ${dimensionHeader} and sort ${metricHeader} descending`);
+    }
+
+    if (metricHeader && secondDimensionHeader) {
+      chartPills.push(`Compare ${metricHeader} across ${secondDimensionHeader}`);
+    }
+
+    const timeHeader = uniqueHeaders.find((header) => /(date|day|week|month|quarter|year|time)/i.test(header));
+    if (metricHeader && timeHeader) {
+      chartPills.push(`Show ${metricHeader} trend by ${timeHeader} with month-over-month change`);
+    }
+
+    if (/pie|donut/.test(queryLower + ' ' + assistantLower) && metricHeader && dimensionHeader) {
+      chartPills.push(`Switch to bar chart for ${dimensionHeader} vs ${metricHeader}`);
+    } else if (/line|trend/.test(queryLower + ' ' + assistantLower) && metricHeader && dimensionHeader) {
+      chartPills.push(`Switch to pie chart share for ${dimensionHeader}`);
+    } else if (metricHeader && dimensionHeader) {
+      chartPills.push(`Use line chart for ${metricHeader} trend and bar chart for ${dimensionHeader} comparison`);
+    }
+
+    if (metricHeader) {
+      kpiPills.push(`Include KPI cards for sum, median, and range of ${metricHeader}`);
+    }
+
+    if (!metricHeader && inferredMetric) {
+      kpiPills.push(`Add KPI cards for total, average, and max ${inferredMetric}`);
+    }
+
+    if (!dimensionHeader && inferredDimension && inferredMetric) {
+      chartPills.push(`Compare ${inferredMetric} across ${inferredDimension}`);
+      filterPills.push(`Filter by ${inferredDimension} and highlight top ${inferredMetric}`);
+    }
+
+    const agGridContext = `${queryLower} ${assistantLower}`;
+    if (metricHeader && dimensionHeader) {
+      tablePills.push(`Table: group by ${dimensionHeader} and aggregate ${metricHeader}`);
+    }
+    if (/\bpivot|cross\s*-?tab\b/.test(agGridContext) && metricHeader) {
+      tablePills.push(`Table: enable pivot mode with ${metricHeader} totals`);
+    } else if (metricHeader) {
+      tablePills.push(`Table: enable pivot mode for deeper ${metricHeader} breakdown`);
+    }
+    if (/\bfit\s*columns|auto\s*-?fit|size\s*to\s*fit\b/.test(agGridContext)) {
+      tablePills.push('Table: auto-fit columns to available width');
+    } else {
+      tablePills.push('Table: auto-size columns based on content width');
+    }
+    if (!/\bstriped|zebra\b/.test(agGridContext)) {
+      tablePills.push('Table: add striped rows and compact table density');
+    }
+
+    if (dimensionHeader) {
+      filterPills.push(`Add dropdown filters for ${dimensionHeader}`);
+    }
+
+    if (!dimensionHeader && inferredDimension) {
+      filterPills.push(`Add dropdown filters for ${inferredDimension}`);
+      tablePills.push(`Table: group by ${inferredDimension} and show summary totals`);
+    }
+
+    layoutPills.push('Switch dashboard theme to executive style');
+    layoutPills.push('Open table in fullscreen and keep charts concise');
+
+    if (latestDashboardUserQuery) {
+      filterPills.push(`Refine current query: ${latestDashboardUserQuery.slice(0, 50)} with advanced filters`);
+      chartPills.push(`Create a focused chart for: ${latestDashboardUserQuery.slice(0, 52)}`);
+      tablePills.push(`Table: sort by relevance to "${latestDashboardUserQuery.slice(0, 36)}"`);
+    }
+
+    const baseSequence = [
+      ...chartPills,
+      ...kpiPills,
+      ...filterPills,
+      ...tablePills,
+      ...layoutPills,
+    ].filter((pill): pill is string => Boolean(pill));
+
+    const uniqueSequence = baseSequence.filter((pill, index, list) => list.indexOf(pill) === index);
+    const seed = hashSeed(`${latestDashboardUserQuery}|${latestDashboardAssistantText}|${messages.length}`);
+    const startIndex = uniqueSequence.length > 0 ? seed % uniqueSequence.length : 0;
+    const mixedPills = uniqueSequence.length > 0
+      ? [...uniqueSequence.slice(startIndex), ...uniqueSequence.slice(0, startIndex)]
+      : [];
+
+    pills.push(...mixedPills);
+
+    if (!pills.length) {
+      const fallbackFocus = latestDashboardUserQuery.slice(0, 40).trim();
+      if (fallbackFocus) {
+        pills.push(`Add filters and top 10 breakdown for ${fallbackFocus}`);
+        pills.push(`Compare categories in ${fallbackFocus} and include KPI variance cards`);
+        pills.push(`Show trend chart with drill-ready table for ${fallbackFocus}`);
+      } else {
+        pills.push('Add filters and top 10 breakdown with interactive table');
+        pills.push('Compare categories and include variance and range KPI cards');
+        pills.push('Show trend chart with drill-ready detailed table');
+      }
+    }
+
+    return pills.filter((pill, index, list) => list.indexOf(pill) === index).slice(0, 8);
+  }, [messages, selectedTool]);
+
+  const latestDashboardAssistantMessageId = useMemo(() => {
+    if (selectedTool !== 'dashboard') return null;
+    const latestAssistant = [...messages].reverse().find((entry) => entry.role === 'assistant');
+    return latestAssistant?.id || null;
+  }, [messages, selectedTool]);
+
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    const canvasEditor = assistantContentRefs.current[messageId]?.querySelector('textarea[data-canvas-editor="true"]') as HTMLTextAreaElement | null;
+    const textToCopy = canvasEditor?.value?.trim()
+      ? canvasEditor.value.trim()
+      : extractCopyReadyText(content);
+    if (!textToCopy.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopiedMessageId(messageId);
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+      copyFeedbackTimeoutRef.current = setTimeout(() => {
+        setCopiedMessageId((current) => (current === messageId ? null : current));
+      }, 1800);
+    } catch (error) {
+      console.error('Failed to copy response:', error);
+    }
+  };
+
+  const registerAssistantContentNode = (id: string, node: HTMLDivElement | null) => {
+    assistantContentRefs.current[id] = node;
   };
 
   /**
@@ -2016,6 +2665,10 @@ export default function HomeView() {
 
     initAudio();
     const userQuery = query;
+    const detectedRequestLanguage = inferLanguageFromTranscript(userQuery) || activeLanguageRef.current || Language.ENGLISH;
+    activeLanguageRef.current = detectedRequestLanguage;
+    setRecognitionLanguageFor(detectedRequestLanguage);
+    syncDetectedLanguageAndPersona(detectedRequestLanguage, userQuery);
     const resolvedMode = resolveSearchMode(userQuery, searchMode);
     if (resolvedMode !== searchMode) {
       setSearchMode(resolvedMode);
@@ -2046,7 +2699,7 @@ export default function HomeView() {
     };
 
     setMessages(prev => [...prev, newUserMsg]);
-    const shouldPersistToolSession = !['dashboard', 'ocr', 'document'].includes(selectedTool || '');
+    const shouldPersistToolSession = !['dashboard', 'document'].includes(selectedTool || '');
 
     if (shouldPersistToolSession) {
       setSelectedHistoryId(historyId);
@@ -2071,6 +2724,7 @@ export default function HomeView() {
           query: existingItem?.query || userQuery,
           mode: currentMode,
           interactionMode: "read",
+          toolTag: selectedTool === 'ocr' ? 'OCR' : existingItem?.toolTag,
           timestamp: requestTimestamp,
           response: undefined,
           audioBlob: undefined,
@@ -2125,6 +2779,10 @@ export default function HomeView() {
               : undefined,
             animate: interactionModeRef.current === 'read',
           };
+
+          if (!imageResponse.imageUrl && imageResponse.error) {
+            markModelUnavailable(selectedModel, imageResponse.error);
+          }
         } else {
           const videoConfig = JSON.parse(sessionStorage.getItem('videoConfig') || '{}');
           // Default to Gemini Veo for video generation (best quality + availability)
@@ -2187,6 +2845,10 @@ export default function HomeView() {
               : undefined,
             animate: interactionModeRef.current === 'read',
           };
+
+          if (!resolvedVideoResponse.videoUrl && resolvedVideoResponse.error) {
+            markModelUnavailable(videoModel, resolvedVideoResponse.error);
+          }
         }
 
         setMessages((prev) => [...prev, assistantMsg]);
@@ -2222,6 +2884,13 @@ export default function HomeView() {
         }
       } catch (error) {
         console.error(error);
+        const modelForFailure = selectedTool === 'video'
+          ? (selectedModel === 'auto' ? 'veo-2.0-generate-001' : selectedModel)
+          : selectedModel;
+        markModelUnavailable(
+          modelForFailure,
+          error instanceof Error ? error.message : 'api failure'
+        );
         const errorMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -2230,6 +2899,206 @@ export default function HomeView() {
           animate: interactionModeRef.current === 'read',
         };
         setMessages((prev) => [...prev, errorMsg]);
+      } finally {
+        setIsLoading(false);
+      }
+
+      return;
+    }
+
+    if (selectedTool === 'ocr') {
+      setIsLoading(true);
+      try {
+        const filesForOcr = attachments.filter((file) => !!file.base64);
+        const assistantTimestamp = new Date();
+
+        if (!filesForOcr.length) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: 'Please attach an image or document file for OCR extraction.',
+              timestamp: assistantTimestamp,
+              animate: interactionModeRef.current === 'read',
+            },
+          ]);
+          return;
+        }
+
+        const ocrEngineModel = selectedModel === 'ocr-extended-response' ? 'google-vision-ocr' : selectedModel;
+        const extractedSections: Array<{ name: string; text: string; provider?: string }> = [];
+        const failedFiles: Array<{ name: string; error: string }> = [];
+
+        for (const file of filesForOcr) {
+          const ocrResponse = await generateToolOCR(
+            file.base64 as string,
+            file.name,
+            ocrEngineModel,
+            { language: settings.language, mimeType: file.type }
+          );
+
+          if (ocrResponse.error) {
+            failedFiles.push({ name: file.name, error: ocrResponse.error });
+            markModelUnavailable(ocrEngineModel, ocrResponse.error);
+            continue;
+          }
+
+          const extractedText = (ocrResponse.fullText || '').trim();
+          if (extractedText) {
+            extractedSections.push({
+              name: file.name,
+              text: extractedText,
+              provider: ocrResponse.provider,
+            });
+          }
+        }
+
+        const extractedText = extractedSections
+          .map((section) => `### ${section.name}\n${section.text}`)
+          .join('\n\n');
+        let assistantContent = extractedSections.length
+          ? `✅ OCR completed (${extractedSections[0]?.provider || 'google-vision'}) for ${extractedSections.length} file(s).\n\n${extractedText}`
+          : failedFiles.length
+            ? `OCR failed for all files.\n\n${failedFiles.map((item) => `- ${item.name}: ${item.error}`).join('\n')}`
+            : 'OCR completed but no readable text was detected in the attached files.';
+
+        const inAutoOcrMode = selectedModel === 'auto';
+        const inExtendedOcrMode = selectedModel === 'ocr-extended-response';
+        const wantsEditableCanvas = isEditableCanvasRequested(userQuery);
+        const wantsStructuredOutput = isStructuredOcrOutputRequested(userQuery);
+        const shouldGenerateExtendedResponse = extractedSections.length > 0
+          && (inExtendedOcrMode || (inAutoOcrMode && (wantsStructuredOutput || wantsEditableCanvas)));
+
+        if (shouldGenerateExtendedResponse) {
+          const combinedExtractedText = extractedSections
+            .map((section) => `[File: ${section.name}]\n${section.text}`)
+            .join('\n\n');
+
+          const clippedText = combinedExtractedText.length > 12000
+            ? `${combinedExtractedText.slice(0, 12000)}\n\n[Text truncated for processing.]`
+            : combinedExtractedText;
+
+          const ocrAsRequest = `
+User request:
+${userQuery}
+
+OCR extracted text from attached files:
+${clippedText}
+
+${failedFiles.length ? `Some files failed OCR:\n${failedFiles.map((item) => `- ${item.name}: ${item.error}`).join('\n')}` : ''}
+
+Primary goal: satisfy the exact user request using the OCR content.
+${inAutoOcrMode ? '- Auto mode rule: focus only on what the user explicitly asked; do not add extra sections.' : ''}
+Requirements:
+- Keep wording faithful to source notes; do not rewrite unless text is unreadable.
+- Reconstruct layout using markdown sections and bullet hierarchy matching the source.
+- If content is tabular, include markdown table(s).
+- If the notes imply process/steps/flow, include a \`\`\`diagram code block in Mermaid syntax (for example: flowchart TD; A-->B;).
+- If a visual/chart/canvas-like representation is needed, include a \`\`\`chart code block with JSON spec.
+- Remove OCR artifacts and noisy symbols (stray **, isolated brackets, random placeholder tokens like [REMO]) unless clearly intentional in source.
+- Use clean markdown only (headings, lists, tables, code blocks) with no decorative symbols.
+- Include a short "Assumptions / Unclear OCR" section only when necessary.
+${wantsEditableCanvas
+? `- Since user requested editable notes: output exactly one \`\`\`canvas block.
+- The canvas block MUST be JSON: {"title":"Digital note","content":"..."}
+- In content, preserve the note design/layout and keep it readable/editable.
+- Do not output any text outside the canvas block.`
+: '- End with a "Digital note" section containing only the final consolidated notes.'}
+`;
+
+          const formatterModel = 'gemini-flash';
+          let aiResponse = await generateNarrative(
+            ocrAsRequest,
+            currentMode,
+            {
+              ...settings,
+              language: detectedRequestLanguage,
+              narrationType: 'Educational',
+            },
+            [...messages.slice(-5), newUserMsg].map((m) => ({ role: m.role, content: m.content })),
+            'read',
+            {
+              profile: userProfile || undefined,
+              recentQueries: history.slice(0, 8).map((item) => item.query),
+              attachments,
+            },
+            undefined,
+            formatterModel
+          );
+
+          if (isUnavailableNarrative((aiResponse.narration || '').trim())) {
+            aiResponse = await generateNarrative(
+              ocrAsRequest,
+              currentMode,
+              {
+                ...settings,
+                language: detectedRequestLanguage,
+                narrationType: 'Educational',
+              },
+              [...messages.slice(-5), newUserMsg].map((m) => ({ role: m.role, content: m.content })),
+              'read',
+              {
+                profile: userProfile || undefined,
+                recentQueries: history.slice(0, 8).map((item) => item.query),
+                attachments,
+              }
+            );
+          }
+
+          for (const failedModel of aiResponse.failedModels || []) {
+            markModelUnavailable(failedModel, 'api failure');
+          }
+
+          const detailedText = (aiResponse.narration || '').trim();
+          const normalizedDetailedText = normalizeOcrDigitalNotes(detailedText);
+          const hasUsableDigitalNote = !!normalizedDetailedText && !isUnavailableNarrative(normalizedDetailedText);
+          assistantContent = hasUsableDigitalNote
+            ? `✅ OCR completed for ${extractedSections.length} file(s).\n\nDigital note:\n\n${normalizedDetailedText}`
+            : `${assistantContent}\n\n⚠️ Structured digital note formatting is unavailable right now, so raw OCR text is shown above.`;
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: assistantContent,
+            timestamp: assistantTimestamp,
+            animate: interactionModeRef.current === 'read',
+          },
+        ]);
+
+        if (pendingHistoryItem) {
+          const updatedHistoryItem: HistoryItem = {
+            ...pendingHistoryItem,
+            response: assistantContent,
+            conversation: [
+              ...(pendingHistoryItem.conversation || []),
+              {
+                role: 'assistant',
+                content: assistantContent,
+                timestamp: assistantTimestamp,
+              },
+            ],
+          };
+          upsertHistoryItem(updatedHistoryItem);
+        }
+      } catch (error) {
+        console.error('OCR session failed:', error);
+        const errorText = error instanceof Error ? error.message : 'Unknown OCR error';
+        const ocrEngineModel = selectedModel === 'ocr-extended-response' ? 'google-vision-ocr' : selectedModel;
+        markModelUnavailable(ocrEngineModel, errorText);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: 'I ran into an error while extracting text. Please try again.',
+            timestamp: new Date(),
+            animate: interactionModeRef.current === 'read',
+          },
+        ]);
       } finally {
         setIsLoading(false);
       }
@@ -2269,6 +3138,8 @@ export default function HomeView() {
       Requirements:
       - Include: Title, Executive Summary, Method/Approach, Findings, Comparative Table, Chart Insights, Recommendations, and Conclusion.
       - Keep formatting clear and professional with strong indentation and section hierarchy.
+      - Keep the title concise and wrap-safe (max 12 words, avoid long unbroken strings).
+      - Keep title and section headings left-aligned with consistent indentation.
       - If attachments are provided, analyze them and include their insights in the report.
       - Ensure content is export-ready for ${requestedFormat.toUpperCase()} generation.
       ${requestedSizeKB ? `- Target file size: approximately ${requestedSizeKB} KB while preserving quality.` : ''}
@@ -2277,7 +3148,7 @@ export default function HomeView() {
         const docNarrative = await generateNarrative(
           reportPrompt,
           currentMode,
-          settings,
+          { ...settings, language: detectedRequestLanguage },
           [...messages.slice(-5), newUserMsg].map((m) => ({ role: m.role, content: m.content })),
           'read',
           {
@@ -2288,6 +3159,9 @@ export default function HomeView() {
           undefined,
           selectedModel
         );
+        for (const failedModel of docNarrative.failedModels || []) {
+          markModelUnavailable(failedModel, 'api failure');
+        }
 
         const generatedDocContent = (docNarrative.narration || '').trim();
         const isNarrativeUnavailable =
@@ -2313,7 +3187,7 @@ export default function HomeView() {
           attachments,
           {
             format: requestedFormat,
-            title: userQuery.slice(0, 80) || 'Research Report',
+            title: buildDocumentTitle(userQuery),
             style: 'professional',
             targetFileSizeKB: requestedSizeKB,
             fileName: `report-${Date.now()}.${requestedFormat === 'markdown' ? 'md' : requestedFormat}`,
@@ -2322,10 +3196,17 @@ export default function HomeView() {
 
         const assistantTimestamp = new Date();
         let assistantContent = 'I could not generate the document right now. Please try again.';
+        let documentPayload: ChatMessage['document'] | undefined;
         if (docResult.fileBase64 && docResult.fileName && docResult.mimeType) {
           const downloadResult = triggerBase64FileDownload(docResult.fileBase64, docResult.fileName, docResult.mimeType);
           assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}) and downloaded.`;
           if (downloadResult.viewUrl) {
+            documentPayload = {
+              url: downloadResult.viewUrl,
+              fileName: docResult.fileName,
+              mimeType: docResult.mimeType,
+              summary: docResult.summary,
+            };
             assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}).`;
             assistantContent += `\n\n[Open document](${downloadResult.viewUrl})`;
             assistantContent += '\n\nIf download is blocked on mobile, open the link above to view/share the file.';
@@ -2335,6 +3216,7 @@ export default function HomeView() {
           }
         } else if (docResult.error) {
           assistantContent = `Document generation failed: ${docResult.error}`;
+          markModelUnavailable(selectedModel, docResult.error);
         }
 
         const assistantMsg: ChatMessage = {
@@ -2343,10 +3225,15 @@ export default function HomeView() {
           content: assistantContent,
           timestamp: assistantTimestamp,
           animate: interactionModeRef.current === 'read',
+          document: documentPayload,
         };
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (error) {
         console.error('Document session failed:', error);
+        markModelUnavailable(
+          selectedModel,
+          error instanceof Error ? error.message : 'api failure'
+        );
         const errorMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -2365,11 +3252,19 @@ export default function HomeView() {
     if (selectedTool === 'dashboard') {
       setIsLoading(true);
       try {
-        const dashboardPrompt = `${userQuery.trim() || 'Create a responsive business dashboard from the uploaded data.'}
+        const attachmentSummary = attachments.length
+          ? `Attached datasets (${attachments.length}):\n${attachments.map((file) => `- ${file.name}`).join('\n')}`
+          : 'No attachments provided. Build from user intent and generated placeholders only when needed.';
+
+        const dashboardPrompt = `User request:\n${userQuery.trim() || 'Create a responsive business dashboard from the uploaded data.'}
+
+${attachmentSummary}
 
 Dashboard rules:
-- If the user gives specific dashboard requirements, follow them.
-- If no specific requirement is given, apply a generic executive preset with KPI cards, chart area, and a detailed data table.
+- Build dynamically from the user query (do not force a fixed preset layout).
+- Support custom chart type, KPI cards, metrics, dimensions, filters, grouping, sorting, comparison, and top-N requests.
+- When multiple attachments are present, analyze them together and include cross-file comparison where useful.
+- For large datasets, prioritize aggregated KPIs, performant defaults, and responsive rendering.
 - Keep layout responsive for full-window dialog view.`;
 
         const dashboardResult = await generateToolDashboard(dashboardPrompt, attachments);
@@ -2391,6 +3286,7 @@ Dashboard rules:
           };
         } else if (dashboardResult.error) {
           assistantContent = `Dashboard creation failed: ${dashboardResult.error}`;
+          markModelUnavailable(selectedModel, dashboardResult.error);
         }
 
         const assistantMsg: ChatMessage = {
@@ -2404,6 +3300,10 @@ Dashboard rules:
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (error) {
         console.error('Dashboard session failed:', error);
+        markModelUnavailable(
+          selectedModel,
+          error instanceof Error ? error.message : 'api failure'
+        );
         const errorMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -2481,7 +3381,7 @@ Dashboard rules:
       const narrativeResponse = await generateNarrative(
         finalQuery,
         currentMode,
-        settings,
+        { ...settings, language: detectedRequestLanguage },
         chatHistory,
         "read",
         {
@@ -2492,6 +3392,15 @@ Dashboard rules:
         undefined,
         selectedModel
       );
+      for (const failedModel of narrativeResponse.failedModels || []) {
+        markModelUnavailable(failedModel, 'api failure');
+      }
+      const responseLanguage = normalizeLanguage(narrativeResponse.languageUsed);
+      if (responseLanguage) {
+        activeLanguageRef.current = responseLanguage;
+        setRecognitionLanguageFor(responseLanguage);
+        syncDetectedLanguageAndPersona(responseLanguage, userQuery);
+      }
       const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
       if (resolvedModel) {
         setLatestResponseModel(resolvedModel);
@@ -2559,7 +3468,7 @@ Dashboard rules:
       setReadSuggestions(baseSuggestions);
 
       void (async () => {
-        const generatedSuggestions = await generateSuggestions(userQuery, settings.language, chatHistory);
+        const generatedSuggestions = await generateSuggestions(userQuery, detectedRequestLanguage, chatHistory);
         const fallbackSuggestions = buildSuggestionFallback(userQuery);
         const mergedSuggestions = [...baseSuggestions, ...generatedSuggestions, ...fallbackSuggestions]
           .map((item) => item.trim())
@@ -2624,10 +3533,29 @@ Dashboard rules:
     };
     
     const heading = toolHeadings[tool] || `${tool} Session`;
+    const dashboardAssistText = `**${heading}**
+
+Ready to assist with dashboard creation.
+
+  Query presets you can use directly:
+  - Sales per region with region filter and total sales KPI
+  - Revenue vs cost by product category with variance KPI and top 15 rows
+  - Month-over-month growth by channel with line chart and trend summary
+  - Compare attached files by source and show contribution share (%)
+  - Customer segment performance with median, average, and distribution
+
+  Customizations supported in plain language:
+  - Math: sum, average, median, variance, range, growth/change, comparison
+  - Visuals: bar/line/pie chart, table on/off, top N, sorting, grouping, filters
+  - Style: dark, light, minimal, executive (ask in query)
+  - Scale: large datasets, multiple attachments, cross-file comparison, aggregated KPIs`;
+
     const toolMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'assistant',
-      content: `**${heading}**\n\nReady to assist with ${tool}. What would you like to do?`,
+      content: tool === 'dashboard'
+        ? dashboardAssistText
+        : `**${heading}**\n\nReady to assist with ${tool}. What would you like to do?`,
       timestamp: new Date(),
       animate: false,
     };
@@ -2636,6 +3564,7 @@ Dashboard rules:
 
   const mapSelectedModelToProvider = (model: string): AIModel => {
     if (model === 'auto') return AIModel.AUTO;
+    if (model === 'ocr-extended-response') return AIModel.AUTO;
     if (model.startsWith('gpt-')) return AIModel.OPENAI;
     if (model.startsWith('claude-')) return AIModel.CLAUDE_SONNET;
     if (model.startsWith('gemini-') || model.startsWith('imagen-') || model.startsWith('veo-')) return AIModel.GEMINI;
@@ -2643,13 +3572,32 @@ Dashboard rules:
     return AIModel.AUTO;
   };
 
+  const shouldDisableModelFromError = (errorText?: string) => {
+    if (!errorText) return false;
+    return /(insufficient|quota|rate\s*limit|429|billing|api\s*key|unauthorized|forbidden|service unavailable|timeout|timed out|502|503|504|api failure|api error)/i.test(errorText);
+  };
+
+  const markModelUnavailable = useCallback((modelId: string, errorText?: string) => {
+    if (!modelId || modelId === 'auto') return;
+    if (!shouldDisableModelFromError(errorText)) return;
+    setDisabledModelIds((prev) => (prev.includes(modelId) ? prev : [...prev, modelId]));
+  }, []);
+
   const handleModelChange = (model: string) => {
+    if (disabledModelIds.includes(model)) return;
     setSelectedModel(model);
     setSettings((prev) => ({
       ...prev,
       aiModel: mapSelectedModelToProvider(model),
     }));
   };
+
+  useEffect(() => {
+    if (selectedModel !== 'auto' && disabledModelIds.includes(selectedModel)) {
+      setSelectedModel('auto');
+      setSettings((prev) => ({ ...prev, aiModel: AIModel.AUTO }));
+    }
+  }, [disabledModelIds, selectedModel]);
 
   const openMediaDialog = (message: ChatMessage) => {
     if (!message.media) return;
@@ -2734,6 +3682,8 @@ Dashboard rules:
           };
           setMessages((prev) => [...prev, assistantMsg]);
           setMediaDialog((prev) => prev ? { ...prev, url: regeneratedUrl, modelUsed: regenerated.modelUsed } : prev);
+        } else if (regenerated.error) {
+          markModelUnavailable(selectedModel, regenerated.error);
         }
       } else {
         const videoConfig = JSON.parse(sessionStorage.getItem('videoConfig') || '{}');
@@ -2757,11 +3707,19 @@ Dashboard rules:
           };
           setMessages((prev) => [...prev, assistantMsg]);
           setMediaDialog((prev) => prev ? { ...prev, url: regeneratedUrl, modelUsed: regenerated.modelUsed } : prev);
+        } else if (regenerated.error) {
+          markModelUnavailable(videoModel, regenerated.error);
         }
       }
     } catch (error) {
       if (!abortController.signal.aborted) {
         console.error('Regenerate failed:', error);
+        markModelUnavailable(
+          mediaDialog.type === 'video'
+            ? (selectedModel === 'auto' ? 'veo-2.0-generate-001' : selectedModel)
+            : selectedModel,
+          error instanceof Error ? error.message : 'api failure'
+        );
       }
     } finally {
       mediaRegenAbortRef.current = null;
@@ -2798,6 +3756,7 @@ Dashboard rules:
   const getCurrentModelLabel = () => {
     const selectedLabels: Record<string, string> = {
       auto: 'Auto',
+      'ocr-extended-response': 'Extended Response',
       'gpt-4': 'GPT-4 Turbo',
       'gpt-3.5': 'GPT-3.5 Turbo',
       'claude-opus': 'Claude 3 Opus',
@@ -2835,19 +3794,23 @@ Dashboard rules:
     return null;
   };
 
+  const normalizeLanguage = (value?: string): Language | null => {
+    if (!value) return null;
+    const matched = Object.values(Language).find(
+      (language) => language.toLowerCase() === value.toLowerCase()
+    );
+    return matched || null;
+  };
+
   async function handleListenTranscript(transcript: string) {
     if (!transcript.trim() || isLoading) return;
 
     initAudio();
     const inferredLanguage = inferLanguageFromTranscript(transcript);
-    const effectiveLanguage = inferredLanguage || settings.language;
-    if (inferredLanguage && inferredLanguage !== settings.language) {
-      setSettings((prev) => ({
-        ...prev,
-        language: inferredLanguage,
-      }));
-      setRecognitionLanguageFor(inferredLanguage);
-    }
+    const effectiveLanguage = inferredLanguage || activeLanguageRef.current || Language.ENGLISH;
+    activeLanguageRef.current = effectiveLanguage;
+    setRecognitionLanguageFor(effectiveLanguage);
+    syncDetectedLanguageAndPersona(effectiveLanguage, transcript);
     const resolvedMode = resolveSearchMode(transcript, searchMode);
     if (resolvedMode !== searchMode) {
       setSearchMode(resolvedMode);
@@ -2916,6 +3879,17 @@ Dashboard rules:
         continuation,
         selectedModel
       );
+
+      for (const failedModel of narrativeResponse.failedModels || []) {
+        markModelUnavailable(failedModel, 'api failure');
+      }
+
+      const responseLanguage = normalizeLanguage(narrativeResponse.languageUsed);
+      if (responseLanguage) {
+        activeLanguageRef.current = responseLanguage;
+        setRecognitionLanguageFor(responseLanguage);
+        syncDetectedLanguageAndPersona(responseLanguage, transcript);
+      }
 
       const resolvedModel = normalizeModel(narrativeResponse.modelUsed);
       if (resolvedModel) {
@@ -3033,9 +4007,34 @@ Dashboard rules:
     }
   }
 
+  const getLatestSuggestionAttachments = (): AttachedFile[] => {
+    const latestUserWithAttachments = [...messages]
+      .reverse()
+      .find((msg) => msg.role === 'user' && Array.isArray(msg.attachments) && msg.attachments.length > 0);
+
+    if (!latestUserWithAttachments?.attachments?.length) return [];
+
+    const resolvedTool: AttachedFile['tool'] =
+      selectedTool === 'image' || selectedTool === 'video' || selectedTool === 'ocr' || selectedTool === 'document' || selectedTool === 'dashboard'
+        ? selectedTool
+        : 'dashboard';
+
+    return latestUserWithAttachments.attachments
+      .filter((file) => Boolean(file?.name && file?.data))
+      .map((file, index) => ({
+        id: `pill-${Date.now()}-${index}`,
+        name: file.name,
+        size: file.size || 0,
+        type: file.type || 'application/octet-stream',
+        base64: file.data,
+        tool: resolvedTool,
+      }));
+  };
+
   const handleReadSuggestionClick = (suggestion: string) => {
     setInputValue(suggestion);
-    void submitQuery(suggestion);
+    const attachments = getLatestSuggestionAttachments();
+    void submitQuery(suggestion, attachments);
   };
 
   const handleNarrateHistoryEntry = async (
@@ -3383,7 +4382,7 @@ Dashboard rules:
                     <div className="flex items-center gap-2">
                       <span className="truncate">{item.query}</span>
                       <span className="ml-auto text-[9px] uppercase tracking-widest text-[var(--muted)]">
-                        {item.interactionMode === "listen" ? "Listen" : "Read"}
+                        {getHistoryBadgeLabel(item)}
                       </span>
                     </div>
                   </button>
@@ -3541,7 +4540,7 @@ Dashboard rules:
                           <div className="flex items-center gap-2">
                             <span className="truncate">{item.query}</span>
                             <span className="ml-auto text-[9px] uppercase tracking-widest text-[var(--muted)]">
-                              {item.interactionMode === "listen" ? "Listen" : "Read"}
+                              {getHistoryBadgeLabel(item)}
                             </span>
                           </div>
                         </button>
@@ -3620,6 +4619,18 @@ Dashboard rules:
                 const isUser = msg.role === 'user';
                 const isLatestMessage = index === messages.length - 1;
                 const displayContent = isUser ? msg.content : getAssistantDisplayContent(msg);
+                const isDashboardAssistantMessage = msg.role === 'assistant' && (
+                  !!msg.dashboard ||
+                  isDashboardSessionSuggestionMessage(msg) ||
+                  (selectedTool === 'dashboard' && isLatestMessage)
+                );
+                const showNarrationButton = !(
+                  msg.media?.type === 'image' ||
+                  !!msg.document ||
+                  isDashboardAssistantMessage ||
+                  isOcrAssistantMessage(msg)
+                );
+                const showCopyButton = !isDashboardAssistantMessage;
                 return (
                   <div
                     key={msg.id}
@@ -3639,7 +4650,10 @@ Dashboard rules:
                           </div>
                         )}
                         {msg.role === 'assistant' ? (
-                          <div className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]">
+                          <div
+                            ref={(node) => registerAssistantContentNode(msg.id, node)}
+                            className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]"
+                          >
                             {msg.media && (
                               <button
                                 type="button"
@@ -3689,12 +4703,57 @@ Dashboard rules:
                                 </p>
                               </button>
                             )}
+                            {msg.document?.url && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  window.open(msg.document?.url, '_blank', 'noopener,noreferrer');
+                                }}
+                                className="mb-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="h-10 w-10 rounded-lg border border-[var(--border)] bg-[var(--background)] flex items-center justify-center text-[var(--muted-strong)]">
+                                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                      <polyline points="14 2 14 8 20 8" />
+                                    </svg>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs sm:text-sm font-semibold text-[var(--foreground)] whitespace-normal break-words leading-snug">
+                                      {msg.document.fileName || 'Generated document'}
+                                    </p>
+                                    <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">
+                                      Tap to open document
+                                    </p>
+                                  </div>
+                                </div>
+                                {msg.document.summary && (
+                                  <p className="mt-2 text-[10px] uppercase tracking-widest text-[var(--muted)]">
+                                    {msg.document.summary}
+                                  </p>
+                                )}
+                              </button>
+                            )}
                             {sanitizeNarrationForDisplay(displayContent).trim() && (
                               <RichMarkdown
                                 content={sanitizeNarrationForDisplay(displayContent)}
                                 enableTabs
                                 enableSlider
                               />
+                            )}
+                            {selectedTool === 'dashboard' && msg.id === latestDashboardAssistantMessageId && dashboardChatSuggestionPills.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2" role="list" aria-label="Dashboard customization suggestions">
+                                {dashboardChatSuggestionPills.map((pill) => (
+                                  <button
+                                    key={pill}
+                                    type="button"
+                                    onClick={() => handleReadSuggestionClick(pill)}
+                                    className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted-strong)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                                  >
+                                    {pill}
+                                  </button>
+                                ))}
+                              </div>
                             )}
                           </div>
                         ) : (
@@ -3704,19 +4763,32 @@ Dashboard rules:
                     {msg.role === 'assistant' && (
                       <>
                         <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-3 uppercase tracking-tighter mt-2">
-                          <button
-                            onClick={() => {
-                              if (msg.audioBlob) {
-                                handlePlayAudio(msg.audioBlob);
-                              } else {
-                                void handleNarrateReadMessage(msg);
-                              }
-                            }}
-                            className="p-0.5 hover:text-[var(--foreground)] transition-colors"
-                            title="Listen to narration"
-                          >
-                            <VolumeIcon className="w-3.5 h-3.5" />
-                          </button>
+                          {showNarrationButton && (
+                            <button
+                              onClick={() => {
+                                if (msg.audioBlob) {
+                                  handlePlayAudio(msg.audioBlob);
+                                } else {
+                                  void handleNarrateReadMessage(msg);
+                                }
+                              }}
+                              className="p-0.5 hover:text-[var(--foreground)] transition-colors"
+                              title="Listen to narration"
+                            >
+                              <VolumeIcon className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {showCopyButton && (
+                            <button
+                              onClick={() => {
+                                void handleCopyMessage(msg.id, msg.content);
+                              }}
+                              className="px-1.5 py-0.5 rounded border border-[var(--border)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors normal-case"
+                              title="Copy full response"
+                            >
+                              {copiedMessageId === msg.id ? 'Copied' : 'Copy'}
+                            </button>
+                          )}
                           <span>Self \\ Fles</span>
                           <span>•</span>
                           <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -3997,6 +5069,7 @@ Dashboard rules:
                       onNewTopic={messages.length > 0 ? startNewChatSession : undefined}
                       selectedTool={selectedTool}
                       selectedModel={selectedModel}
+                      disabledModelIds={disabledModelIds}
                       currentMode={selectedTool || 'text'}
                       preferredTextProvider={settings.aiModel}
                       isNewChat={messages.length === 0}

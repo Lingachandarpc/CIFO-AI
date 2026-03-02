@@ -326,8 +326,8 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Response Style</label>
-              <div className="grid grid-cols-3 gap-3">
-                {(["Realistic", "Dramatic", "Educational"] as Settings["narrationType"][]).map((type) => (
+              <div className="grid grid-cols-2 gap-3">
+                {(["Realistic", "Dramatic", "Educational", "Personalized"] as Settings["narrationType"][]).map((type) => (
                   <button
                     key={type}
                     type="button"

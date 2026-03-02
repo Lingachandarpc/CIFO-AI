@@ -201,7 +201,8 @@ ${intentGuide}
 - Use **bold** for key terms and headings.
 ${context.language ? `- Respond entirely in ${context.language}.` : ''}
 ${context.narrationType === 'Educational' ? '- Use educational formatting only when it improves clarity; do not force tables/charts/tabs/sliders in every answer.' : ''}
-${context.narrationType === 'Dramatic' ? '- Add engaging narrative elements and emotional depth.' : ''}`;
+${context.narrationType === 'Dramatic' ? '- Add engaging narrative elements and emotional depth.' : ''}
+${context.narrationType === 'Personalized' ? '- Personalize explanations using user profile context (interests, pulse, bio, age, location) when relevant.' : ''}`;
 
   const user = `${classification.normalizedQuery}${buildUserProfileContext(context.userProfile)}${buildWebContext(context.webResults)}${buildAttachmentContext(classification)}`;
 
@@ -239,6 +240,7 @@ ${intentGuide}
 ${context.language ? `**Language**: Respond entirely in ${context.language}.` : ''}
 ${context.narrationType === 'Educational' ? '\n**Style**: Use educational formatting selectively—add tables/diagrams/tabs/progress only when they materially improve understanding.' : ''}
 ${context.narrationType === 'Dramatic' ? '\n**Style**: Weave narrative tension, emotional depth, and storytelling into the analysis.' : ''}
+${context.narrationType === 'Personalized' ? '\n**Style**: Tailor the response to user profile context (interests, pulse, bio, age, location) where helpful.' : ''}
 
 **Quality Standards:**
 - Cite specific sources, studies, or examples when making claims.
@@ -468,6 +470,9 @@ function buildFormatGuidance(
 
     if (context.narrationType === 'Educational') {
       parts.push('Educational style: prioritize clarity first; use advanced markdown blocks only when the content demands it.');
+    }
+    if (context.narrationType === 'Personalized') {
+      parts.push('Personalized style: tailor examples and framing to the user profile context (interests, pulse, bio, age, location) when relevant.');
     }
   }
 

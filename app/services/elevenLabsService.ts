@@ -1,5 +1,10 @@
 import { Language, VoiceName, VoiceGender } from '../types';
 
+export type ElevenLabsTtsAudioPayload = {
+  audio: string;
+  mimeType: string;
+};
+
 // ElevenLabs voice IDs with language and persona support
 export const ELEVENLABS_VOICES: Record<
   VoiceName,
@@ -149,15 +154,19 @@ export const NARRATION_SETTINGS: Record<
     stability: 0.7,
     similarity_boost: 0.81, // Clearer, more consistent
   },
+  Personalized: {
+    stability: 0.62,
+    similarity_boost: 0.86,
+  },
 };
 
 export async function generateSpeechWithElevenLabs(
   text: string,
   voiceType: string,
   language: Language,
-  narrationType: 'Realistic' | 'Dramatic' | 'Educational',
+  narrationType: 'Realistic' | 'Dramatic' | 'Educational' | 'Personalized',
   voiceGender: VoiceGender = VoiceGender.AUTO
-): Promise<string> {
+): Promise<ElevenLabsTtsAudioPayload> {
   try {
     const voiceSettings = NARRATION_SETTINGS[narrationType] || NARRATION_SETTINGS.Realistic;
     const preferredVoices = getVoicesForLanguageAndGender(language, voiceGender);
@@ -171,7 +180,7 @@ export async function generateSpeechWithElevenLabs(
 
     if (!voice) {
       console.error(`Voice ${resolvedVoiceType} not found in ElevenLabs configuration`);
-      return '';
+      return { audio: '', mimeType: 'audio/mpeg' };
     }
 
     // Check language support
@@ -202,14 +211,17 @@ export async function generateSpeechWithElevenLabs(
         language,
         voiceGender,
       });
-      return '';
+      return { audio: '', mimeType: 'audio/mpeg' };
     }
 
     const data = await res.json();
-    return data.audio || '';
+    return {
+      audio: data.audio || '',
+      mimeType: data.mimeType || 'audio/mpeg',
+    };
   } catch (error) {
     console.error('Error generating speech with ElevenLabs:', error);
-    return '';
+    return { audio: '', mimeType: 'audio/mpeg' };
   }
 }
 
@@ -227,7 +239,11 @@ export function getVoicesForLanguageAndGender(
 }
 
 export function decodeAudio(base64: string): Uint8Array {
-  const binaryString = atob(base64);
+  const cleanedBase64 = (base64 || '')
+    .trim()
+    .replace(/^data:[^;]+;base64,/i, '')
+    .replace(/\s+/g, '');
+  const binaryString = atob(cleanedBase64);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
@@ -239,6 +255,6 @@ export async function getAudioBuffer(
   data: Uint8Array,
   audioContext: AudioContext
 ): Promise<AudioBuffer> {
-  const arrayBuffer = data.buffer as ArrayBuffer;
+  const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
   return audioContext.decodeAudioData(arrayBuffer);
 }

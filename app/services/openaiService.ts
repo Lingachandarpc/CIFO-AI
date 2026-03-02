@@ -2,6 +2,11 @@ import { SearchMode, Settings, VoiceName, Language } from '../types';
 
 const API_BASE = '/api/chronoread';
 
+export type TtsAudioPayload = {
+  audio: string;
+  mimeType: string;
+};
+
 export async function generateNarrative(
   query: string,
   mode: SearchMode,
@@ -32,7 +37,7 @@ export async function generateNarrative(
     userInterruption?: string;
   },
   selectedModel?: string
-): Promise<{ narration: string; modelUsed?: string; referencesHtml?: string; tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost?: number } }> {
+): Promise<{ narration: string; languageUsed?: string; modelUsed?: string; failedModels?: string[]; referencesHtml?: string; tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost?: number } }> {
   try {
     const category = mode === SearchMode.BOOK ? 'Book' : mode === SearchMode.CASE_STUDY ? 'Case Study' : 'Ask';
     const res = await fetch(`${API_BASE}/ai`, {
@@ -57,13 +62,18 @@ export async function generateNarrative(
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
       console.error('AI proxy error:', payload);
-      return { narration: 'Sorry — AI is unavailable right now.' };
+      return {
+        narration: 'Sorry — AI is unavailable right now.',
+        failedModels: Array.isArray(payload?.failedModels) ? payload.failedModels : [],
+      };
     }
 
     const data = await res.json();
     return { 
       narration: data.narration || '', 
+      languageUsed: data.languageUsed,
       modelUsed: data.modelUsed,
+      failedModels: Array.isArray(data.failedModels) ? data.failedModels : [],
       referencesHtml: data.referencesHtml,
       tokenUsage: data.tokenUsage,
     };
@@ -73,7 +83,7 @@ export async function generateNarrative(
   }
 }
 
-export async function generateSpeech(text: string, voiceType: string, language?: string): Promise<string> {
+export async function generateSpeechDetailed(text: string, voiceType: string, language?: string): Promise<TtsAudioPayload> {
   try {
     // Enhanced voice mapping for better native speaker experience
     const getOpenAIVoice = (voiceType: string, language?: string): string => {
@@ -127,21 +137,32 @@ export async function generateSpeech(text: string, voiceType: string, language?:
 
         if (retry.ok) {
           const data = await retry.json();
-          return data.audio || '';
+          return {
+            audio: data.audio || '',
+            mimeType: data.mimeType || 'audio/mpeg',
+          };
         }
       }
 
       const payload = await res.json().catch(() => ({}));
       console.error('TTS proxy error:', payload);
-      return '';
+      return { audio: '', mimeType: 'audio/mpeg' };
     }
 
     const data = await res.json();
-    return data.audio || '';
+    return {
+      audio: data.audio || '',
+      mimeType: data.mimeType || 'audio/mpeg',
+    };
   } catch (error) {
     console.error('Error generating speech (proxy):', error);
-    return '';
+    return { audio: '', mimeType: 'audio/mpeg' };
   }
+}
+
+export async function generateSpeech(text: string, voiceType: string, language?: string): Promise<string> {
+  const result = await generateSpeechDetailed(text, voiceType, language);
+  return result.audio;
 }
 
 export async function generateSuggestions(
@@ -403,8 +424,50 @@ export async function generateToolDashboard(
   }
 }
 
+export async function generateToolOCR(
+  fileBase64: string,
+  fileName: string,
+  model: string = 'auto',
+  options?: { language?: string; mimeType?: string }
+): Promise<{ fullText?: string; details?: unknown[]; provider?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/ai-tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'ocr',
+        file: fileBase64,
+        fileName,
+        mimeType: options?.mimeType,
+        options: {
+          model,
+          language: options?.language,
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return { error: data?.error || 'OCR failed' };
+    }
+
+    return {
+      fullText: data?.data?.fullText as string | undefined,
+      details: data?.data?.details as unknown[] | undefined,
+      provider: data?.provider as string | undefined,
+    };
+  } catch (error) {
+    console.error('Error generating OCR output:', error);
+    return { error: 'OCR service is unavailable right now.' };
+  }
+}
+
 export function decodeAudio(base64: string): Uint8Array {
-  const binaryString = atob(base64);
+  const cleanedBase64 = (base64 || '')
+    .trim()
+    .replace(/^data:[^;]+;base64,/i, '')
+    .replace(/\s+/g, '');
+  const binaryString = atob(cleanedBase64);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
