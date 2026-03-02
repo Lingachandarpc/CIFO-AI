@@ -1822,8 +1822,8 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
   <title>${escapeHtml(dashboardTitle)}</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 0; min-height: 100vh; padding: 20px; background: #0b1020; color: #e8ecf7; }
-    .wrapper { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 0; min-height: 100vh; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: #0b1020; color: #e8ecf7; overflow-x: hidden; }
+    .wrapper { max-width: 1320px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
     .header { display: flex; flex-direction: column; gap: 8px; }
     .header h1 { margin: 0; font-size: 24px; }
     .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
@@ -1834,7 +1834,7 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     .card { background: linear-gradient(180deg, #151c38, #11172f); border: 1px solid #2b335c; border-radius: 12px; padding: 14px; }
     .label { color: #a8b0d8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
     .value { font-size: 26px; font-weight: 700; margin-top: 8px; }
-    .layout { display: grid; grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1.35fr); gap: 12px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr); gap: 12px; }
     .chart-panel, .table-panel { background: #121933; border: 1px solid #293055; border-radius: 12px; padding: 14px; min-height: 260px; }
     .panel-title { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #a8b0d8; }
     .bar-row { display: grid; grid-template-columns: 110px 1fr 72px; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -1848,17 +1848,18 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     .pie-legend { display: flex; flex-direction: column; gap: 6px; }
     .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #d9e1ff; }
     .legend-color { width: 10px; height: 10px; border-radius: 2px; }
-    .table-wrap { width: 100%; overflow: auto; }
+    .table-wrap { width: 100%; max-width: 100%; overflow: auto; -webkit-overflow-scrolling: touch; }
     table { width: 100%; border-collapse: collapse; background: #121933; min-width: 620px; }
     th, td { border-bottom: 1px solid #293055; padding: 10px 12px; text-align: left; font-size: 13px; white-space: nowrap; }
     th { color: #a8b0d8; text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; position: sticky; top: 0; background: #121933; }
     tr:last-child td { border-bottom: none; }
     @media (max-width: 980px) {
-      body { padding: 12px; }
       .layout { grid-template-columns: 1fr; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
       .bar-track { height: 10px; }
       .pie-wrap { grid-template-columns: 1fr; }
+      table { min-width: 0; }
+      th, td { white-space: normal; word-break: break-word; }
     }
   </style>
 </head>

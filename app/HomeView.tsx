@@ -1705,13 +1705,49 @@ export default function HomeView() {
     }
   };
 
-  const triggerBase64FileDownload = (base64Data: string, fileName: string, mimeType: string) => {
-    const anchor = document.createElement('a');
-    anchor.href = `data:${mimeType};base64,${base64Data}`;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
+  const triggerBase64FileDownload = (base64Data: string, fileName: string, mimeType: string): { viewUrl?: string; downloaded: boolean } => {
+    try {
+      const binary = atob(base64Data);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const blob = new Blob([bytes], { type: mimeType });
+      const objectUrl = URL.createObjectURL(blob);
+
+      const isMobile = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent)
+        || window.matchMedia('(max-width: 768px)').matches;
+
+      if (isMobile) {
+        const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+        if (opened) {
+          return { viewUrl: objectUrl, downloaded: false };
+        }
+
+        const mobileAnchor = document.createElement('a');
+        mobileAnchor.href = objectUrl;
+        mobileAnchor.target = '_blank';
+        mobileAnchor.rel = 'noopener noreferrer';
+        document.body.appendChild(mobileAnchor);
+        mobileAnchor.click();
+        document.body.removeChild(mobileAnchor);
+        return { viewUrl: objectUrl, downloaded: false };
+      }
+
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 15000);
+      return { downloaded: true };
+    } catch {
+      const anchor = document.createElement('a');
+      anchor.href = `data:${mimeType};base64,${base64Data}`;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      return { downloaded: true };
+    }
   };
 
   const isGenericQuery = (value: string) => {
@@ -2287,8 +2323,13 @@ export default function HomeView() {
         const assistantTimestamp = new Date();
         let assistantContent = 'I could not generate the document right now. Please try again.';
         if (docResult.fileBase64 && docResult.fileName && docResult.mimeType) {
-          triggerBase64FileDownload(docResult.fileBase64, docResult.fileName, docResult.mimeType);
+          const downloadResult = triggerBase64FileDownload(docResult.fileBase64, docResult.fileName, docResult.mimeType);
           assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}) and downloaded.`;
+          if (downloadResult.viewUrl) {
+            assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}).`;
+            assistantContent += `\n\n[Open document](${downloadResult.viewUrl})`;
+            assistantContent += '\n\nIf download is blocked on mobile, open the link above to view/share the file.';
+          }
           if (docResult.summary) {
             assistantContent += `\n\n${docResult.summary}`;
           }

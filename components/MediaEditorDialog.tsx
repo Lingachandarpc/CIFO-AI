@@ -43,7 +43,7 @@ export default function MediaEditorDialog({
     }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[500] bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[500] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5 shadow-2xl">
+        <Dialog.Content className="fixed inset-0 z-[500] h-[100dvh] w-screen rounded-none border-0 bg-[var(--surface)] p-4 shadow-2xl overflow-y-auto md:inset-auto md:left-1/2 md:top-1/2 md:w-[94vw] md:max-w-3xl md:h-auto md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-[var(--border)] md:p-4 sm:md:p-5 md:overflow-visible">
           <div className="flex items-center justify-between gap-3">
             <Dialog.Title className="text-sm sm:text-base font-semibold text-[var(--foreground)]">
               {mediaType === 'image' ? 'Image Editor' : 'Video Editor'}
