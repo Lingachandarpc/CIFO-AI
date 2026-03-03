@@ -191,6 +191,43 @@ export async function generateSuggestions(
   }
 }
 
+export async function generateDashboardSuggestions(
+  query: string,
+  chatHistory: Array<{ role: string; content: string }>,
+  headers: string[] = []
+): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/suggestions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        language: Language.ENGLISH,
+        chatHistory,
+        tool: 'dashboard',
+        headers,
+      }),
+    });
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      console.error('Dashboard suggestions proxy error:', payload);
+      return [];
+    }
+
+    const data = await res.json();
+    return Array.isArray(data.suggestions)
+      ? data.suggestions
+          .map((item: unknown) => String(item || '').trim())
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
+  } catch (error) {
+    console.error('Error generating dashboard suggestions (proxy):', error);
+    return [];
+  }
+}
+
 export async function generateToolImage(
   prompt: string,
   model: string = 'auto',

@@ -12,7 +12,9 @@ export async function POST(req: Request) {
   const openai = new OpenAI({ apiKey: key });
 
   try {
-    const { query, language, chatHistory } = await req.json();
+    const { query, language, chatHistory, tool, headers } = await req.json();
+
+    const isDashboardMode = String(tool || '').toLowerCase() === 'dashboard';
 
     const formattedHistory = Array.isArray(chatHistory)
       ? chatHistory
@@ -21,12 +23,25 @@ export async function POST(req: Request) {
           .join('\n')
       : '';
 
-    const prompt = `Based on the user's query and recent conversation, suggest 3 concise, relevant follow-up prompts in ${language}.\n\nQuery: "${query}"\n\nConversation:\n${formattedHistory}\n\nRules:\n- Output exactly 3 lines, each a short suggestion (4-10 words).\n- No numbering or bullets.\n- Keep them specific to the user's interests and prior prompts.\n- ${language} only.`;
+    const normalizedHeaders = Array.isArray(headers)
+      ? headers
+          .map((header) => String(header || '').trim())
+          .filter(Boolean)
+          .slice(0, 20)
+      : [];
+
+    const resolvedLanguage = String(language || 'English');
+
+    const prompt = isDashboardMode
+      ? `Based on the dashboard request, suggest 6 concise dashboard customization prompts in ${resolvedLanguage}.\n\nRequest: "${query}"\n\nDataset headers: ${normalizedHeaders.length ? normalizedHeaders.join(', ') : 'Unknown'}\n\nRecent conversation:\n${formattedHistory}\n\nRules:\n- Output exactly 6 lines.\n- Each line must be a ready-to-run dashboard command prompt (6-16 words).\n- Focus on chart choice, KPI cards, grouping, sorting, filters, table layout, and theme.\n- Do not include numbering or bullets.\n- No markdown.`
+      : `Based on the user's query and recent conversation, suggest 3 concise, relevant follow-up prompts in ${resolvedLanguage}.\n\nQuery: "${query}"\n\nConversation:\n${formattedHistory}\n\nRules:\n- Output exactly 3 lines, each a short suggestion (4-10 words).\n- No numbering or bullets.\n- Keep them specific to the user's interests and prior prompts.\n- ${resolvedLanguage} only.`;
 
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       {
         role: "system",
-        content: `You generate short, relevant follow-up suggestions in ${language}.`,
+        content: isDashboardMode
+          ? `You generate dashboard customization prompts that can be directly submitted as dashboard requests in ${resolvedLanguage}.`
+          : `You generate short, relevant follow-up suggestions in ${resolvedLanguage}.`,
       },
       {
         role: "user",
@@ -35,7 +50,7 @@ export async function POST(req: Request) {
     ];
 
     const res = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: process.env.OPENAI_SUGGESTIONS_MODEL || "gpt-3.5-turbo",
       messages,
     });
 
@@ -44,7 +59,7 @@ export async function POST(req: Request) {
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
-      .slice(0, 3);
+      .slice(0, isDashboardMode ? 6 : 3);
 
     return NextResponse.json({ suggestions });
   } catch (err) {

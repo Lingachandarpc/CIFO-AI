@@ -63,7 +63,7 @@ const TOOL_OPTIONS: ToolOption[] = [
 
 const AI_MODELS: AIModel[] = [
   { id: "auto", label: "Auto - Best Available", provider: "Auto", modes: ["text", "image", "video", "ocr", "document"], description: "Smart routing picks the best model for your query" },
-  { id: "google-vision-ocr", label: "Google Vision OCR", provider: "Google", modes: ["ocr"], description: "Google Cloud Vision API text extraction" },
+  { id: "google-vision-ocr", label: "Simple response", provider: "OCR", modes: ["ocr"], description: "Basic OCR text extraction" },
   { id: "ocr-extended-response", label: "Extended Response", provider: "AI", modes: ["ocr"], description: "Extract text, then generate a detailed educational explanation" },
   // IMAGE MODELS
   { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "Google", modes: ["image"], description: "Fast, high-quality image generation" },
@@ -105,6 +105,7 @@ interface SearchBarProps {
   placeholder?: string;
   isNewChat?: boolean;
   isListening?: boolean;
+  prefillQuery?: string;
 }
 
 export default function SearchBar({
@@ -123,6 +124,7 @@ export default function SearchBar({
   placeholder = "Ask a story, case, or question...",
   isNewChat = true,
   isListening = false,
+  prefillQuery,
 }: SearchBarProps) {
   const [query, setQuery] = useState("");
   const [isExpanded, setIsExpanded] = useState(false);
@@ -147,6 +149,12 @@ export default function SearchBar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof prefillQuery === 'string') {
+      setQuery(prefillQuery);
+    }
+  }, [prefillQuery]);
 
   // Calculate line count
   const lineCount = query.split("\n").length;
@@ -295,6 +303,7 @@ export default function SearchBar({
 
   const recommendedModels = getModeRecommendedModels();
   const shouldShowSessionWarning = selectedTool === 'dashboard' || selectedTool === 'document';
+  const shouldShowModelSelector = selectedTool !== 'dashboard';
 
   useEffect(() => {
     if (!recommendedModels.some((model) => model.id === selectedModel)) {
@@ -379,6 +388,7 @@ export default function SearchBar({
                 </div>
               )}
 
+              {currentMode !== 'document' && (
               <div className="relative flex-shrink-0">
                 <input
                   ref={fileInputRef}
@@ -408,6 +418,7 @@ export default function SearchBar({
                   )}
                 </button>
               </div>
+              )}
 
               {(currentMode === 'image' || currentMode === 'video') && (
                 <button
@@ -432,6 +443,7 @@ export default function SearchBar({
                 </button>
               )}
 
+              {shouldShowModelSelector && (
               <div className="relative min-w-0 flex-shrink" ref={modelMenuRef}>
                 <button
                   onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
@@ -507,6 +519,7 @@ export default function SearchBar({
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
 

@@ -180,7 +180,7 @@ const TableBlockView = ({ raw }: { raw: string }) => {
           <thead>
             <tr className="border-b border-[var(--border)]">
               {parsed.columns.map((column) => (
-                <th key={column} className="px-2 sm:px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-strong)] whitespace-nowrap">
+                <th key={column} className="px-2 sm:px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-strong)] whitespace-normal [overflow-wrap:break-word] [word-break:normal] [hyphens:auto]">
                   {column}
                 </th>
               ))}
@@ -190,7 +190,7 @@ const TableBlockView = ({ raw }: { raw: string }) => {
             {parsed.rows.map((row, rowIndex) => (
               <tr key={`${row.join('-')}-${rowIndex}`} className="border-b border-[var(--border)] last:border-b-0">
                 {row.map((cell, cellIndex) => (
-                  <td key={`${cell}-${cellIndex}`} className="px-2 sm:px-3 py-2 text-[var(--foreground)] text-xs sm:text-sm whitespace-normal break-words">
+                  <td key={`${cell}-${cellIndex}`} className="px-2 sm:px-3 py-2 text-[var(--foreground)] text-xs sm:text-sm whitespace-normal [overflow-wrap:break-word] [word-break:normal] [hyphens:auto]">
                     {cell}
                   </td>
                 ))}

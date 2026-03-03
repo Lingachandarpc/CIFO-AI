@@ -512,6 +512,16 @@ body {
 .chat-response-content.prose table th,
 .chat-response-content.prose table td {
   white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
+}
+
+.chat-response-content.prose table td strong,
+.chat-response-content.prose table th strong {
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .chat-response-content img,

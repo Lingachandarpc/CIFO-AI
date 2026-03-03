@@ -5,7 +5,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { JWT, OAuth2Client } from 'google-auth-library';
-import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
+import { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import * as XLSX from 'xlsx';
 import { existsSync, readFileSync } from 'fs';
 
@@ -1673,21 +1673,144 @@ export async function generateDocument(content: string, format: 'pdf' | 'docx' |
     }
 
     if (format === 'docx') {
-      const sections: Paragraph[] = [];
-      sections.push(new Paragraph({ text: reportTitle, heading: HeadingLevel.TITLE }));
-      sections.push(new Paragraph({ text: `Generated: ${new Date().toLocaleString()}` }));
-      sections.push(new Paragraph({ text: '' }));
+      const titleSize = 38;
+      const headingSize = 30;
+      const bodySize = 24;
+      const bodyLineHeight = 360;
+      const metadataSize = 20;
+      const sourceLines = normalized.split('\n');
+      const markdownTable = extractMarkdownPipeTableFromLines(sourceLines);
+      const resolvedDocxTable = tableData || (markdownTable ? { columns: markdownTable.columns, rows: markdownTable.rows } : null);
+      const markdownTableConsumed = markdownTable?.consumed || new Set<number>();
 
-      for (const line of nonEmptyLines) {
-        if (/^#{1,6}\s+/.test(line)) {
-          sections.push(new Paragraph({ text: line.replace(/^#{1,6}\s+/, ''), heading: HeadingLevel.HEADING_2 }));
+      const stripInlineMarkdown = (value: string): string => String(value || '')
+        .replace(/!\[[^\]]*\]\([^\)]+\)/g, '')
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/__(.*?)__/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/_(.*?)_/g, '$1')
+        .replace(/~~(.*?)~~/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\\([`*_{}\[\]()#+\-.!|])/g, '$1')
+        .replace(/\|/g, ' | ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
+      const sections: Array<Paragraph | Table> = [];
+      sections.push(new Paragraph({
+        spacing: { after: 240, line: bodyLineHeight },
+        children: [new TextRun({ text: reportTitle, bold: true, size: titleSize })],
+      }));
+      sections.push(new Paragraph({
+        spacing: { after: 160, line: bodyLineHeight },
+        children: [new TextRun({ text: `Generated: ${new Date().toLocaleString()}`, size: metadataSize })],
+      }));
+
+      for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex += 1) {
+        if (markdownTableConsumed.has(lineIndex)) {
           continue;
         }
-        if (/^[-*]\s+/.test(line)) {
-          sections.push(new Paragraph({ text: line.replace(/^[-*]\s+/, ''), bullet: { level: 0 } }));
+
+        const rawLine = sourceLines[lineIndex];
+        const line = rawLine.replace(/\r/g, '');
+        const trimmedLine = line.trim();
+
+        if (!trimmedLine) {
+          sections.push(new Paragraph({
+            spacing: { after: 120, line: bodyLineHeight },
+            children: [new TextRun({ text: '', size: bodySize })],
+          }));
           continue;
         }
-        sections.push(new Paragraph({ children: [new TextRun({ text: line })] }));
+
+        if (/^#{1,6}\s+/.test(trimmedLine)) {
+          const headingText = stripInlineMarkdown(trimmedLine.replace(/^#{1,6}\s+/, '').trim());
+          sections.push(new Paragraph({
+            spacing: { before: 120, after: 80, line: bodyLineHeight },
+            children: [new TextRun({ text: headingText, bold: true, size: headingSize })],
+          }));
+          continue;
+        }
+
+        if (/^[-*]\s+/.test(trimmedLine)) {
+          const bulletText = stripInlineMarkdown(trimmedLine.replace(/^[-*]\s+/, '').trim());
+          sections.push(new Paragraph({
+            bullet: { level: 0 },
+            spacing: { after: 80, line: bodyLineHeight },
+            children: [new TextRun({ text: bulletText, size: bodySize })],
+          }));
+          continue;
+        }
+
+        if (/^\d+[.)]\s+/.test(trimmedLine)) {
+          const orderedMatch = trimmedLine.match(/^(\d+[.)])\s+(.*)$/);
+          const orderedText = orderedMatch
+            ? `${orderedMatch[1]} ${stripInlineMarkdown(orderedMatch[2])}`
+            : stripInlineMarkdown(trimmedLine);
+          sections.push(new Paragraph({
+            spacing: { after: 80, line: bodyLineHeight },
+            children: [new TextRun({ text: orderedText, size: bodySize })],
+          }));
+          continue;
+        }
+
+        if (/^\|.*\|$/.test(trimmedLine) || /^\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+$/.test(trimmedLine)) {
+          continue;
+        }
+
+        sections.push(new Paragraph({
+          spacing: { after: 120, line: bodyLineHeight },
+          children: [new TextRun({ text: stripInlineMarkdown(line), size: bodySize })],
+        }));
+      }
+
+      if (resolvedDocxTable && resolvedDocxTable.columns.length && resolvedDocxTable.rows.length) {
+        sections.push(new Paragraph({
+          spacing: { before: 180, after: 100, line: bodyLineHeight },
+          children: [new TextRun({ text: 'Table Data', bold: true, size: headingSize })],
+        }));
+
+        const maxColumns = Math.max(1, Math.min(resolvedDocxTable.columns.length, 8));
+        const headers = resolvedDocxTable.columns.slice(0, maxColumns).map((column, index) => {
+          const cleaned = stripInlineMarkdown(column || '').trim();
+          return cleaned || `Column ${index + 1}`;
+        });
+        const visibleRows = resolvedDocxTable.rows
+          .slice(0, 200)
+          .map((row) => headers.map((_, index) => stripInlineMarkdown(row[index] || '')));
+
+        const docTable = new Table({
+          width: {
+            size: 100,
+            type: WidthType.PERCENTAGE,
+          },
+          rows: [
+            new TableRow({
+              tableHeader: true,
+              children: headers.map((header) => new TableCell({
+                children: [new Paragraph({
+                  spacing: { after: 80, line: bodyLineHeight },
+                  children: [new TextRun({ text: header, bold: true, size: bodySize })],
+                })],
+              })),
+            }),
+            ...visibleRows.map((row) => new TableRow({
+              children: row.map((cellText) => new TableCell({
+                children: [new Paragraph({
+                  spacing: { after: 80, line: bodyLineHeight },
+                  children: [new TextRun({ text: cellText || '-', size: bodySize })],
+                })],
+              })),
+            })),
+          ],
+        });
+
+        sections.push(docTable);
+        sections.push(new Paragraph({
+          spacing: { after: 120, line: bodyLineHeight },
+          children: [new TextRun({ text: '', size: bodySize })],
+        }));
       }
 
       const document = new Document({ sections: [{ children: sections }] });
@@ -2081,6 +2204,83 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
     };
 
     const dashboardTitle = inferTitle();
+
+    const defaultDashboardSummary = 'Responsive dashboard created from uploaded dataset. Click preview to open interactive full view.';
+
+    const generateLlmDashboardSummary = async (): Promise<string> => {
+      const openAiApiKey = process.env.OPENAI_API_KEY;
+      if (!openAiApiKey) {
+        return defaultDashboardSummary;
+      }
+
+      try {
+        const model = process.env.OPENAI_DASHBOARD_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+        const sampleRows = rows.slice(0, 8);
+        const payload = {
+          title: dashboardTitle,
+          request: userRequest || 'Generate a dashboard',
+          rowCount: rows.length,
+          columnCount: headers.length,
+          metricColumn: metricColumnIndex >= 0 ? headers[metricColumnIndex] : null,
+          groupByColumn: groupByColumnIndex >= 0 ? headers[groupByColumnIndex] : null,
+          headers,
+          sampleRows,
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${openAiApiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: 0.2,
+            max_tokens: 120,
+            messages: [
+              {
+                role: 'system',
+                content: 'Write exactly 1-2 concise sentences describing dashboard insights. No markdown. No bullet points. Keep it factual and user-friendly.',
+              },
+              {
+                role: 'user',
+                content: `Summarize this dashboard context as a preview message: ${JSON.stringify(payload)}`,
+              },
+            ],
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          return defaultDashboardSummary;
+        }
+
+        const llmData = await response.json() as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+
+        const llmSummary = String(llmData.choices?.[0]?.message?.content || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (!llmSummary) {
+          return defaultDashboardSummary;
+        }
+
+        return llmSummary.length > 260
+          ? `${llmSummary.slice(0, 257).trimEnd()}...`
+          : llmSummary;
+      } catch {
+        return defaultDashboardSummary;
+      }
+    };
+
+    const dashboardSummaryPromise = generateLlmDashboardSummary();
 
     const topNMatch = userRequest.match(/\btop\s+(\d{1,3})\b/i);
     const requestedTopN = topNMatch ? Math.max(1, Math.min(100, Number(topNMatch[1] || 0))) : null;
@@ -3297,12 +3497,13 @@ export async function generateDashboard(prompt: string, attachments?: Array<{ ty
 </html>`;
 
     const htmlBuffer = Buffer.from(html, 'utf-8');
+    const dashboardSummary = await dashboardSummaryPromise;
     return {
       success: true,
       data: {
         htmlBase64: htmlBuffer.toString('base64'),
         title: dashboardTitle,
-        summary: 'Responsive dashboard created from uploaded dataset. Click preview to open interactive full view.',
+        summary: dashboardSummary,
       },
       type: 'dashboard',
       processingTime: Date.now() - startTime,

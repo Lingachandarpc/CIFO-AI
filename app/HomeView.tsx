@@ -9,7 +9,7 @@ import { SearchMode, Settings, ChatMessage, HistoryItem, HistoryConversationEntr
 import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon, VolumeIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
 import SearchBar, { type AttachedFile } from '../components/SearchBar';
-import { generateNarrative, generateSpeechDetailed, decodeAudio, getAudioBuffer, generateSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus, generateToolDocument, generateToolDashboard, generateToolOCR, type TtsAudioPayload } from './services/openaiService';
+import { generateNarrative, generateSpeechDetailed, decodeAudio, getAudioBuffer, generateSuggestions, generateDashboardSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus, generateToolDocument, generateToolDashboard, generateToolOCR, type TtsAudioPayload } from './services/openaiService';
 import MediaEditorDialog from '../components/MediaEditorDialog';
 import DashboardDialog from '../components/DashboardDialog';
 import { generateSpeechWithElevenLabs } from './services/elevenLabsService';
@@ -164,6 +164,7 @@ export default function HomeView() {
   const [isNarrating, setIsNarrating] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(true);
   const [readSuggestions, setReadSuggestions] = useState<string[]>([]);
+  const [dashboardLlmSuggestions, setDashboardLlmSuggestions] = useState<string[]>([]);
   const [activeNarrationKey, setActiveNarrationKey] = useState<string | null>(null);
   const [isHistoryNarrationLoading, setIsHistoryNarrationLoading] = useState(false);
   const { status } = useSession();
@@ -2162,13 +2163,77 @@ export default function HomeView() {
   };
 
   const normalizeOcrDigitalNotes = (text: string) => {
+    const collapseCharacterWrappedLines = (input: string) => {
+      const lines = input.split(/\r?\n/);
+      const output: string[] = [];
+
+      const isCharacterLine = (line: string) => {
+        const compact = line.replace(/\s+/g, '').trim();
+        if (!compact) return false;
+        if (compact.length > 2) return false;
+        return /^[A-Za-z0-9+\-*/=(){}[\]\\^_.,:;<>|]+$/.test(compact);
+      };
+
+      let index = 0;
+      while (index < lines.length) {
+        if (!isCharacterLine(lines[index])) {
+          output.push(lines[index]);
+          index += 1;
+          continue;
+        }
+
+        const sequence: string[] = [];
+        let cursor = index;
+        while (cursor < lines.length && isCharacterLine(lines[cursor])) {
+          sequence.push(lines[cursor].replace(/\s+/g, '').trim());
+          cursor += 1;
+        }
+
+        if (sequence.length >= 6) {
+          output.push(sequence.join(''));
+          index = cursor;
+          continue;
+        }
+
+        output.push(...lines.slice(index, cursor));
+        index = cursor;
+      }
+
+      return output.join('\n');
+    };
+
+    const preserveSegments = (input: string, pattern: RegExp, store: string[]) => {
+      return input.replace(pattern, (segment) => {
+        const token = `@@OCR_PRESERVE_${store.length}@@`;
+        store.push(segment);
+        return token;
+      });
+    };
+
+    const restoreSegments = (input: string, store: string[]) => {
+      let restored = input;
+      store.forEach((segment, index) => {
+        const token = `@@OCR_PRESERVE_${index}@@`;
+        restored = restored.split(token).join(segment);
+      });
+      return restored;
+    };
+
     const stripMarkdownAsterisks = (input: string) => {
-      return input
+      const preserved: string[] = [];
+      let working = input;
+      working = preserveSegments(working, /```[\s\S]*?```/g, preserved);
+      working = preserveSegments(working, /\$\$[\s\S]*?\$\$/g, preserved);
+      working = preserveSegments(working, /\$(?:\\.|[^$\n])+\$/g, preserved);
+
+      const normalized = working
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/__(.*?)__/g, '$1')
         .replace(/^\s*\*\s+/gm, '- ')
         .replace(/^\s*\*\s*$/gm, '')
         .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1$2');
+
+      return restoreSegments(normalized, preserved);
     };
 
     const source = (text || '').trim();
@@ -2177,25 +2242,28 @@ export default function HomeView() {
       try {
         const parsed = JSON.parse(source) as { content?: string };
         if (typeof parsed?.content === 'string' && parsed.content.trim()) {
-          return stripMarkdownAsterisks(parsed.content)
+          return collapseCharacterWrappedLines(
+            stripMarkdownAsterisks(parsed.content)
             .replace(/\r\n/g, '\n')
             .replace(/[\u200B-\u200D\uFEFF]/g, '')
             .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
-            .replace(/[ \t]{2,}/g, ' ')
             .replace(/\n{4,}/g, '\n\n')
-            .trim();
+            .replace(/\n{4,}/g, '\n\n')
+            .trim()
+          );
         }
       } catch {
       }
     }
 
-    return stripMarkdownAsterisks(source)
-      .replace(/\r\n/g, '\n')
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n{4,}/g, '\n\n')
-      .trim();
+    return collapseCharacterWrappedLines(
+      stripMarkdownAsterisks(source)
+            .replace(/\r\n/g, '\n')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
+            .replace(/\n{4,}/g, '\n\n')
+        .trim()
+    );
   };
 
   const isUnavailableNarrative = (text: string) => {
@@ -2229,6 +2297,73 @@ export default function HomeView() {
       normalized.includes('query presets you can use directly')
     );
   };
+
+  useEffect(() => {
+    if (selectedTool !== 'dashboard') {
+      setDashboardLlmSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const latestDashboardUserQuery = [...messages]
+          .reverse()
+          .find((entry) => entry.role === 'user')?.content?.trim() || '';
+
+        const requestQuery = inputValue.trim() || latestDashboardUserQuery || 'Create a dashboard with useful customizations';
+
+        const latestUserWithAttachments = [...messages]
+          .reverse()
+          .find((entry) => entry.role === 'user' && Array.isArray(entry.attachments) && entry.attachments.length > 0);
+
+        const attachments = latestUserWithAttachments?.attachments || [];
+        const datasetHeaders = attachments.flatMap((file) => {
+          if (!file?.data) return [] as string[];
+          const lowerName = String(file.name || '').toLowerCase();
+          const isCsvLike = /\.csv$|\.txt$/.test(lowerName) || /csv|text\//i.test(String(file.type || ''));
+          if (!isCsvLike) return [] as string[];
+
+          try {
+            const binary = atob(file.data);
+            const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+            const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes).slice(0, 4000);
+            const firstDataLine = decoded
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .find((line) => line.length > 0);
+            if (!firstDataLine) return [] as string[];
+            return firstDataLine
+              .split(',')
+              .map((cell) => cell.replace(/^"|"$/g, '').trim())
+              .filter(Boolean)
+              .slice(0, 12);
+          } catch {
+            return [] as string[];
+          }
+        });
+
+        const uniqueHeaders = datasetHeaders.filter((header, index, list) => list.indexOf(header) === index).slice(0, 20);
+
+        const chatHistory = messages
+          .slice(-8)
+          .map((entry) => ({ role: entry.role, content: entry.content }));
+
+        const generated = await generateDashboardSuggestions(requestQuery, chatHistory, uniqueHeaders);
+        if (!cancelled) {
+          setDashboardLlmSuggestions(generated.slice(0, 6));
+          if (generated.length > 0) {
+            setReadSuggestions(generated.slice(0, 3));
+          }
+        }
+      })();
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selectedTool, inputValue, messages]);
 
   const dashboardChatSuggestionPills = useMemo(() => {
     if (selectedTool !== 'dashboard') return [] as string[];
@@ -2416,8 +2551,11 @@ export default function HomeView() {
       }
     }
 
-    return pills.filter((pill, index, list) => list.indexOf(pill) === index).slice(0, 8);
-  }, [messages, selectedTool]);
+    return [...dashboardLlmSuggestions, ...pills]
+      .filter((pill): pill is string => Boolean(pill && pill.trim()))
+      .filter((pill, index, list) => list.indexOf(pill) === index)
+      .slice(0, 8);
+  }, [messages, selectedTool, dashboardLlmSuggestions]);
 
   const latestDashboardAssistantMessageId = useMemo(() => {
     if (selectedTool !== 'dashboard') return null;
@@ -2954,8 +3092,20 @@ export default function HomeView() {
           }
         }
 
+        const formatRawOcrSection = (section: { name: string; text: string; provider?: string }) => {
+          const providerLabel = section.provider || 'google-vision';
+          return [
+            `### ${section.name}`,
+            `- Provider: ${providerLabel}`,
+            '',
+            '```text',
+            section.text,
+            '```',
+          ].join('\n');
+        };
+
         const extractedText = extractedSections
-          .map((section) => `### ${section.name}\n${section.text}`)
+          .map((section) => formatRawOcrSection(section))
           .join('\n\n');
         let assistantContent = extractedSections.length
           ? `✅ OCR completed (${extractedSections[0]?.provider || 'google-vision'}) for ${extractedSections.length} file(s).\n\n${extractedText}`
@@ -2965,10 +3115,11 @@ export default function HomeView() {
 
         const inAutoOcrMode = selectedModel === 'auto';
         const inExtendedOcrMode = selectedModel === 'ocr-extended-response';
+        const inGoogleVisionMode = selectedModel === 'google-vision-ocr';
         const wantsEditableCanvas = isEditableCanvasRequested(userQuery);
         const wantsStructuredOutput = isStructuredOcrOutputRequested(userQuery);
         const shouldGenerateExtendedResponse = extractedSections.length > 0
-          && (inExtendedOcrMode || (inAutoOcrMode && (wantsStructuredOutput || wantsEditableCanvas)));
+          && (inExtendedOcrMode || inGoogleVisionMode || (inAutoOcrMode && (wantsStructuredOutput || wantsEditableCanvas)));
 
         if (shouldGenerateExtendedResponse) {
           const combinedExtractedText = extractedSections
@@ -2993,9 +3144,12 @@ ${inAutoOcrMode ? '- Auto mode rule: focus only on what the user explicitly aske
 Requirements:
 - Keep wording faithful to source notes; do not rewrite unless text is unreadable.
 - Reconstruct layout using markdown sections and bullet hierarchy matching the source.
+- Preserve formulas exactly as written in OCR text (including LaTeX/Unicode symbols); do not rewrite equation notation.
+- Preserve any existing diagram syntax/code blocks as-is whenever present.
 - If content is tabular, include markdown table(s).
 - If the notes imply process/steps/flow, include a \`\`\`diagram code block in Mermaid syntax (for example: flowchart TD; A-->B;).
 - If a visual/chart/canvas-like representation is needed, include a \`\`\`chart code block with JSON spec.
+- Never output one-character-per-line text; merge broken OCR character-wrapped lines into readable sentences while preserving math and diagram text.
 - Remove OCR artifacts and noisy symbols (stray **, isolated brackets, random placeholder tokens like [REMO]) unless clearly intentional in source.
 - Use clean markdown only (headings, lists, tables, code blocks) with no decorative symbols.
 - Include a short "Assumptions / Unclear OCR" section only when necessary.
@@ -3208,8 +3362,6 @@ ${wantsEditableCanvas
               summary: docResult.summary,
             };
             assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}).`;
-            assistantContent += `\n\n[Open document](${downloadResult.viewUrl})`;
-            assistantContent += '\n\nIf download is blocked on mobile, open the link above to view/share the file.';
           }
           if (docResult.summary) {
             assistantContent += `\n\n${docResult.summary}`;
@@ -4032,6 +4184,11 @@ Ready to assist with dashboard creation.
   };
 
   const handleReadSuggestionClick = (suggestion: string) => {
+    if (selectedTool === 'document') {
+      setInputValue(suggestion);
+      return;
+    }
+
     setInputValue(suggestion);
     const attachments = getLatestSuggestionAttachments();
     void submitQuery(suggestion, attachments);
@@ -4790,6 +4947,20 @@ Ready to assist with dashboard creation.
                             </button>
                           )}
                           <span>Self \\ Fles</span>
+                          {msg.tokenUsage && (
+                            <>
+                              <span>•</span>
+                              <span title={`Prompt: ${msg.tokenUsage.promptTokens} | Completion: ${msg.tokenUsage.completionTokens} | Cost: ~$${msg.tokenUsage.estimatedCost?.toFixed(4) ?? '?'}`}>
+                                {msg.tokenUsage.totalTokens.toLocaleString()} tokens
+                              </span>
+                            </>
+                          )}
+                          {msg.modelUsed && (
+                            <>
+                              <span>•</span>
+                              <span>{getModelLabel(msg.modelUsed)}</span>
+                            </>
+                          )}
                           <span>•</span>
                           <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
@@ -4800,21 +4971,6 @@ Ready to assist with dashboard creation.
                               className="chat-response-content prose prose-sm max-w-full dark:prose-invert min-w-0 overflow-x-auto [overflow-wrap:anywhere]"
                               dangerouslySetInnerHTML={{ __html: msg.referencesHtml }}
                             />
-                          </div>
-                        )}
-                        {(msg.tokenUsage || msg.modelUsed) && (
-                          <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-3 uppercase tracking-tighter mt-2">
-                            {msg.tokenUsage && (
-                              <span title={`Prompt: ${msg.tokenUsage.promptTokens} | Completion: ${msg.tokenUsage.completionTokens} | Cost: ~$${msg.tokenUsage.estimatedCost?.toFixed(4) ?? '?'}`}>
-                                {msg.tokenUsage.totalTokens.toLocaleString()} tokens
-                              </span>
-                            )}
-                            {msg.modelUsed && (
-                              <>
-                                <span>•</span>
-                                <span>Powered by {getModelLabel(msg.modelUsed)}</span>
-                              </>
-                            )}
                           </div>
                         )}
                       </>
@@ -4832,10 +4988,17 @@ Ready to assist with dashboard creation.
               })}
               {isLoading && (
                 <div className="flex justify-start">
-                  {selectedTool === 'image' || selectedTool === 'video' || selectedTool === 'dashboard' ? (
-                    <div className="media-loader-square">
-                      <div className="media-loader-grid" />
-                      <div className="media-loader-scan" />
+                  {selectedTool === 'image' || selectedTool === 'video' || selectedTool === 'dashboard' || selectedTool === 'ocr' ? (
+                    <div className="flex flex-col items-start gap-2">
+                      <div className="media-loader-square">
+                        <div className="media-loader-grid" />
+                        <div className="media-loader-scan" />
+                      </div>
+                      {selectedTool === 'ocr' && (
+                        <div className="text-[10px] uppercase tracking-widest text-[var(--muted)] px-1">
+                          Scanning document...
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="bg-[var(--surface)] border border-[var(--border)] p-4 rounded-2xl animate-pulse">
@@ -5074,6 +5237,7 @@ Ready to assist with dashboard creation.
                       preferredTextProvider={settings.aiModel}
                       isNewChat={messages.length === 0}
                       isListening={isListening}
+                      prefillQuery={inputValue}
                       onSearch={(query: string, attachments: AttachedFile[] = []) => {
                         void handleSubmit(query, attachments);
                       }}
