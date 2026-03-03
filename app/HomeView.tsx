@@ -145,6 +145,14 @@ export default function HomeView() {
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [disabledModelIds, setDisabledModelIds] = useState<string[]>([]);
+  const [disabledToolIds, setDisabledToolIds] = useState<string[]>([]);
+  const [enabledModelsByTool, setEnabledModelsByTool] = useState<Record<string, string[]>>({});
+  const [isServiceLocked, setIsServiceLocked] = useState(false);
+  const [sessionResponsePolicy, setSessionResponsePolicy] = useState<{
+    limit: number | null;
+    used: number;
+    remaining: number | null;
+  } | null>(null);
   const [mediaDialog, setMediaDialog] = useState<MediaDialogState | null>(null);
   const [dashboardDialog, setDashboardDialog] = useState<DashboardDialogState | null>(null);
   const [isMediaRegenerating, setIsMediaRegenerating] = useState(false);
@@ -183,6 +191,14 @@ export default function HomeView() {
     backgroundMusicVolume: 0.15,
     enableWebSearch: true,
   });
+
+  const resolveNarrationType = (value?: string): Settings['narrationType'] => {
+    if (value === 'Practical') return 'Practical';
+    if (value === 'Educational') return 'Educational';
+    if (value === 'Personalized') return 'Personalized';
+    if (value === 'Dramatic') return 'Practical';
+    return 'Realistic';
+  };
   const [googleVoices, setGoogleVoices] = useState<GoogleVoice[]>([]);
   const [lastAutoModel, setLastAutoModel] = useState<AIModel | null>(null);
   const [latestResponseModel, setLatestResponseModel] = useState<AIModel | null>(null);
@@ -287,6 +303,10 @@ export default function HomeView() {
   const lastMicInterruptAtRef = useRef<number>(0);
   const lastListenTranscriptRef = useRef<string>('');
   const lastListenTranscriptAtRef = useRef<number>(0);
+  const listenRealisticFollowUpRef = useRef<{
+    baseQuery: string;
+    clarifyingQuestion: string;
+  } | null>(null);
   const handleListenTranscriptRef = useRef<(transcript: string) => void>(() => {});
   const manualScrollUntilRef = useRef<number>(0); // Track manual scroll time to disable observer updates
   const userMessages = useMemo(() => messages.filter((msg) => msg.role === 'user'), [messages]);
@@ -474,6 +494,31 @@ export default function HomeView() {
         if (authData.authenticated && authData.user?.id) {
           setAuthCheckAuthenticated(true);
           setUserId(authData.user.id);
+          setIsServiceLocked(Boolean(authData?.policy?.locked));
+          setDisabledToolIds(Array.isArray(authData?.policy?.disabledTools) ? authData.policy.disabledTools : []);
+          setDisabledModelIds(Array.isArray(authData?.policy?.disabledModels) ? authData.policy.disabledModels : []);
+          setEnabledModelsByTool(
+            authData?.policy?.enabledModelsByTool && typeof authData.policy.enabledModelsByTool === 'object'
+              ? Object.fromEntries(
+                  Object.entries(authData.policy.enabledModelsByTool as Record<string, unknown>)
+                    .map(([key, value]) => [
+                      String(key || '').trim().toLowerCase(),
+                      Array.isArray(value)
+                        ? value
+                            .map((item) => String(item || '').trim().toLowerCase())
+                            .filter(Boolean)
+                        : [],
+                    ])
+                )
+              : {}
+          );
+          setSessionResponsePolicy(authData?.policy
+            ? {
+                limit: typeof authData.policy.sessionResponseLimit === 'number' ? authData.policy.sessionResponseLimit : null,
+                used: Number(authData.policy.sessionResponsesUsed || 0),
+                remaining: typeof authData.policy.sessionResponsesRemaining === 'number' ? authData.policy.sessionResponsesRemaining : null,
+              }
+            : null);
           loadLocalHistory(authData.user.id);
           migrateGuestHistory(authData.user.id);
 
@@ -502,7 +547,7 @@ export default function HomeView() {
                 settingsData.settings.aiModel === AIModel.AUTO
                   ? settingsData.settings.aiModel
                   : AIModel.AUTO,
-              narrationType: settingsData.settings.narrationType || 'Realistic',
+              narrationType: resolveNarrationType(settingsData.settings.narrationType),
               voiceType: settingsData.settings.voiceType || DEFAULT_GOOGLE_VOICE,
               voiceGender: settingsData.settings.voiceGender || VoiceGender.AUTO,
               language: settingsData.settings.language || Language.ENGLISH,
@@ -540,11 +585,19 @@ export default function HomeView() {
           }
         } else {
           setAuthCheckAuthenticated(false);
+          setIsServiceLocked(false);
+          setDisabledToolIds([]);
+          setEnabledModelsByTool({});
+          setSessionResponsePolicy(null);
           loadLocalHistory(null);
         }
       } catch (error) {
         console.error('Error checking authentication:', error);
         setAuthCheckAuthenticated(false);
+        setIsServiceLocked(false);
+        setDisabledToolIds([]);
+        setEnabledModelsByTool({});
+        setSessionResponsePolicy(null);
         setUserProfile(null);
         loadLocalHistory(null);
       }
@@ -765,8 +818,85 @@ export default function HomeView() {
     return Math.sqrt(sum / data.length);
   };
 
+  const extractRequestedLanguagePreference = (text: string): Language | null => {
+    if (!text) return null;
+
+    const normalized = text.toLowerCase().trim();
+    const normalizedAscii = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const hasLanguageIntent =
+      /\b(speak|talk|communicate|chat|reply|respond|answer|write|use)\b/.test(normalizedAscii)
+      || /\b(language|lang|mode)\b/.test(normalizedAscii)
+      || /\b(change|switch|set|keep|continue)\b/.test(normalizedAscii);
+
+    if (!hasLanguageIntent) {
+      return null;
+    }
+
+    const aliases: Array<{ language: Language; names: string[] }> = [
+      { language: Language.ENGLISH, names: ['english', 'inglish'] },
+      { language: Language.SPANISH, names: ['spanish', 'espanol', 'español'] },
+      { language: Language.FRENCH, names: ['french', 'francais', 'français'] },
+      { language: Language.GERMAN, names: ['german', 'deutsch'] },
+      { language: Language.CHINESE, names: ['chinese', 'mandarin', 'zhongwen', '中文'] },
+      { language: Language.JAPANESE, names: ['japanese', 'nihongo', '日本語'] },
+      { language: Language.HINDI, names: ['hindi'] },
+      { language: Language.PORTUGUESE, names: ['portuguese', 'portugues', 'português'] },
+      { language: Language.TAMIL, names: ['tamil', 'தமிழ்'] },
+      { language: Language.TELUGU, names: ['telugu', 'తెలుగు'] },
+      { language: Language.MALAYALAM, names: ['malayalam', 'മലയാളം'] },
+      { language: Language.KANNADA, names: ['kannada', 'ಕನ್ನಡ'] },
+      { language: Language.BENGALI, names: ['bengali', 'bangla', 'বাংলা'] },
+      { language: Language.MARATHI, names: ['marathi', 'मराठी'] },
+      { language: Language.GUJARATI, names: ['gujarati', 'ગુજરાતી'] },
+      { language: Language.PUNJABI, names: ['punjabi', 'panjabi', 'ਪੰਜਾਬੀ'] },
+    ];
+
+    const intentTemplates = [
+      'speak in {lang}',
+      'talk in {lang}',
+      'communicate in {lang}',
+      'chat in {lang}',
+      'reply in {lang}',
+      'respond in {lang}',
+      'answer in {lang}',
+      'write in {lang}',
+      'use {lang}',
+      'in {lang}',
+      '{lang} language',
+      'language {lang}',
+      'language to {lang}',
+      'switch to {lang}',
+      'change to {lang}',
+      'set language to {lang}',
+      'set to {lang}',
+      'keep it in {lang}',
+      'continue in {lang}',
+    ];
+
+    for (const candidate of aliases) {
+      for (const alias of candidate.names) {
+        const escapedAlias = escapeRegExp(alias);
+        const matchesIntent = intentTemplates.some((template) => {
+          const pattern = template.replace('{lang}', escapedAlias).replace(/\s+/g, '\\s+');
+          return new RegExp(`\\b${pattern}\\b`, 'i').test(normalizedAscii) || new RegExp(`\\b${pattern}\\b`, 'i').test(normalized);
+        });
+
+        if (matchesIntent) {
+          return candidate.language;
+        }
+      }
+    }
+
+    return null;
+  };
+
   const inferLanguageFromTranscript = (text: string): Language | null => {
     if (!text) return null;
+    const explicitlyRequestedLanguage = extractRequestedLanguagePreference(text);
+    if (explicitlyRequestedLanguage) return explicitlyRequestedLanguage;
+
     const normalized = text.toLowerCase().trim();
     const normalizedAscii = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -984,11 +1114,11 @@ export default function HomeView() {
     if (/\b(personalized|personalise|personalize|my profile|based on my profile|for me personally)\b/.test(normalized)) {
       return 'Personalized';
     }
+    if (/\b(use\s*case|case\s*study|framework|strategy|practical|action\s*plan|roadmap|competitor|market\s*analysis|go\s*to\s*market|execution)\b/.test(normalized)) {
+      return 'Practical';
+    }
     if (/\b(explain|teach|learning|learn|steps?|guide|tutorial|definition|overview)\b/.test(normalized)) {
       return 'Educational';
-    }
-    if (/\b(story|narrate|dramatic|emotion|cinematic|thriller|poem|dialogue|roleplay)\b/.test(normalized)) {
-      return 'Dramatic';
     }
     return 'Realistic';
   };
@@ -1088,14 +1218,14 @@ export default function HomeView() {
   };
 
   const getNarrationStyleRate = (style: Settings["narrationType"]) => {
-    if (style === "Dramatic") return 0.95;
+    if (style === "Practical") return 1.0;
     if (style === "Educational") return 0.98;
     if (style === "Personalized") return 1.0;
     return 1.0;
   };
 
   const getNarrationStylePitch = (style: Settings["narrationType"]) => {
-    if (style === "Dramatic") return -2;
+    if (style === "Practical") return -1;
     if (style === "Educational") return 0;
     if (style === "Personalized") return -1;
     return -1;
@@ -1663,7 +1793,7 @@ export default function HomeView() {
     fallback: Settings["narrationType"]
   ): Settings["narrationType"] => {
     if (!profile?.tone) return fallback;
-    if (profile.tone === "intense") return "Dramatic";
+    if (profile.tone === "intense") return "Practical";
     if (profile.tone === "calm") return "Educational";
     return fallback;
   };
@@ -1932,6 +2062,7 @@ export default function HomeView() {
     stopNarration();
     listenRequestPendingRef.current = false;
     ttsSessionRef.current = null;
+    listenRealisticFollowUpRef.current = null;
     if (!isMicMutedRef.current) {
       setListenStatus("listening");
       setRecognitionLanguage();
@@ -1950,6 +2081,7 @@ export default function HomeView() {
     activeListenSessionIdRef.current = null;
     lastNarrationRef.current = '';
     lastListenQueryRef.current = '';
+    listenRealisticFollowUpRef.current = null;
     setSelectedHistory(null);
     setSelectedHistoryId(null);
   };
@@ -2163,6 +2295,16 @@ export default function HomeView() {
   };
 
   const normalizeOcrDigitalNotes = (text: string) => {
+    const stripMermaidParserNoise = (input: string) => {
+      return String(input || '')
+        .replace(/^.*syntax\s+error\s+in\s+text.*$/gim, '')
+        .replace(/^.*mermaid\s+version\s+\d+\.\d+\.\d+.*$/gim, '')
+        .replace(/^.*error\s+icon.*$/gim, '')
+        .replace(/^.*id\s*=\s*"error".*$/gim, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    };
+
     const collapseCharacterWrappedLines = (input: string) => {
       const lines = input.split(/\r?\n/);
       const output: string[] = [];
@@ -2236,14 +2378,14 @@ export default function HomeView() {
       return restoreSegments(normalized, preserved);
     };
 
-    const source = (text || '').trim();
+    const source = stripMermaidParserNoise((text || '').trim());
 
     if (source.startsWith('{') && source.endsWith('}')) {
       try {
         const parsed = JSON.parse(source) as { content?: string };
         if (typeof parsed?.content === 'string' && parsed.content.trim()) {
           return collapseCharacterWrappedLines(
-            stripMarkdownAsterisks(parsed.content)
+            stripMarkdownAsterisks(stripMermaidParserNoise(parsed.content))
             .replace(/\r\n/g, '\n')
             .replace(/[\u200B-\u200D\uFEFF]/g, '')
             .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
@@ -2257,7 +2399,7 @@ export default function HomeView() {
     }
 
     return collapseCharacterWrappedLines(
-      stripMarkdownAsterisks(source)
+      stripMarkdownAsterisks(stripMermaidParserNoise(source))
             .replace(/\r\n/g, '\n')
             .replace(/[\u200B-\u200D\uFEFF]/g, '')
             .replace(/\[(?:REMO|NOISE|GARBLED|UNCLEAR)\]/gi, '')
@@ -2269,6 +2411,9 @@ export default function HomeView() {
   const isUnavailableNarrative = (text: string) => {
     const normalized = (text || '').trim().toLowerCase();
     if (!normalized) return true;
+    if (/^sorry\s*[—-]\s*.*ai is unavailable right now\.?$/i.test(normalized)) {
+      return true;
+    }
     return (
       normalized === 'sorry — ai is unavailable right now.' ||
       normalized === 'sorry - ai is unavailable right now.' ||
@@ -2640,6 +2785,63 @@ export default function HomeView() {
       `Real-world angle on ${base}`,
       `Next steps for ${base}`,
     ];
+  };
+
+  const buildBookSummarySuggestion = (query: string) => {
+    const normalized = (query || '').toLowerCase();
+    const mapping: Array<{ pattern: RegExp; title: string; focus: string }> = [
+      {
+        pattern: /(startup|product\s*market\s*fit|mvp|founder|saas|go\s*to\s*market|gtm)/i,
+        title: 'The Lean Startup',
+        focus: 'how to test assumptions and iterate quickly',
+      },
+      {
+        pattern: /(marketing|brand|positioning|growth|acquisition|seo|content|campaign)/i,
+        title: 'Obviously Awesome',
+        focus: 'how to position clearly and differentiate in market',
+      },
+      {
+        pattern: /(leadership|manager|team|culture|hiring|delegation|people)/i,
+        title: 'The Making of a Manager',
+        focus: 'how to manage teams and decision quality',
+      },
+      {
+        pattern: /(sales|negotiation|closing|b2b|enterprise|pipeline)/i,
+        title: 'SPIN Selling',
+        focus: 'how to run consultative sales conversations',
+      },
+      {
+        pattern: /(finance|cash\s*flow|budget|pricing|profit|unit\s*economics|valuation)/i,
+        title: 'Financial Intelligence',
+        focus: 'how to read numbers and make financially sound decisions',
+      },
+      {
+        pattern: /(career|job|resume|interview|promotion|workplace|productivity)/i,
+        title: 'Deep Work',
+        focus: 'how to improve focus and high-value execution',
+      },
+      {
+        pattern: /(habit|discipline|consistency|routine|motivation|self\s*improvement)/i,
+        title: 'Atomic Habits',
+        focus: 'how to build repeatable behavior change',
+      },
+      {
+        pattern: /(e\s*commerce|ecommerce|shop|store|retail|d2c|inventory|supplier)/i,
+        title: 'The E-Myth Revisited',
+        focus: 'how to systemize operations and scale reliably',
+      },
+      {
+        pattern: /(ai|machine\s*learning|automation|llm|data\s*science|analytics)/i,
+        title: 'Competing in the Age of AI',
+        focus: 'how to apply AI in business workflows and strategy',
+      },
+    ];
+
+    const matched = mapping.find((item) => item.pattern.test(normalized));
+    const title = matched?.title || 'The Personal MBA';
+    const focus = matched?.focus || 'a practical decision framework for this problem';
+
+    return `Summarize "${title}" and extract ${focus}.`;
   };
 
   const extractSuggestionsFromText = (text: string) => {
@@ -3092,34 +3294,39 @@ export default function HomeView() {
           }
         }
 
-        const formatRawOcrSection = (section: { name: string; text: string; provider?: string }) => {
+        const formatSimpleOcrSection = (section: { name: string; text: string; provider?: string }) => {
           const providerLabel = section.provider || 'google-vision';
+          const cleanedText = normalizeOcrDigitalNotes(
+            section.text
+              .replace(/^.*syntax\s+error\s+in\s+text.*$/gim, '')
+              .replace(/^.*mermaid\s+version\s+\d+\.\d+\.\d+.*$/gim, '')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim()
+          );
+
           return [
-            `### ${section.name}`,
-            `- Provider: ${providerLabel}`,
+            `File: ${section.name}`,
+            `Provider: ${providerLabel}`,
             '',
-            '```text',
-            section.text,
-            '```',
+            cleanedText || 'No readable text was detected in this file.',
           ].join('\n');
         };
 
         const extractedText = extractedSections
-          .map((section) => formatRawOcrSection(section))
-          .join('\n\n');
+          .map((section) => formatSimpleOcrSection(section))
+          .join('\n\n----------------------------------------\n\n');
         let assistantContent = extractedSections.length
-          ? `✅ OCR completed (${extractedSections[0]?.provider || 'google-vision'}) for ${extractedSections.length} file(s).\n\n${extractedText}`
+          ? `OCR completed (${extractedSections[0]?.provider || 'google-vision'}) for ${extractedSections.length} file(s).\n\n${extractedText}`
           : failedFiles.length
-            ? `OCR failed for all files.\n\n${failedFiles.map((item) => `- ${item.name}: ${item.error}`).join('\n')}`
+            ? `OCR failed for all files.\n\n${failedFiles.map((item) => `${item.name}: ${item.error}`).join('\n')}`
             : 'OCR completed but no readable text was detected in the attached files.';
 
         const inAutoOcrMode = selectedModel === 'auto';
         const inExtendedOcrMode = selectedModel === 'ocr-extended-response';
-        const inGoogleVisionMode = selectedModel === 'google-vision-ocr';
         const wantsEditableCanvas = isEditableCanvasRequested(userQuery);
         const wantsStructuredOutput = isStructuredOcrOutputRequested(userQuery);
         const shouldGenerateExtendedResponse = extractedSections.length > 0
-          && (inExtendedOcrMode || inGoogleVisionMode || (inAutoOcrMode && (wantsStructuredOutput || wantsEditableCanvas)));
+          && (inExtendedOcrMode || (inAutoOcrMode && (wantsStructuredOutput || wantsEditableCanvas)));
 
         if (shouldGenerateExtendedResponse) {
           const combinedExtractedText = extractedSections
@@ -3161,7 +3368,7 @@ ${wantsEditableCanvas
 : '- End with a "Digital note" section containing only the final consolidated notes.'}
 `;
 
-          const formatterModel = 'gemini-flash';
+          const formatterModel = 'auto';
           let aiResponse = await generateNarrative(
             ocrAsRequest,
             currentMode,
@@ -3209,7 +3416,7 @@ ${wantsEditableCanvas
           const hasUsableDigitalNote = !!normalizedDetailedText && !isUnavailableNarrative(normalizedDetailedText);
           assistantContent = hasUsableDigitalNote
             ? `✅ OCR completed for ${extractedSections.length} file(s).\n\nDigital note:\n\n${normalizedDetailedText}`
-            : `${assistantContent}\n\n⚠️ Structured digital note formatting is unavailable right now, so raw OCR text is shown above.`;
+            : assistantContent;
         }
 
         setMessages((prev) => [
@@ -3563,7 +3770,12 @@ Dashboard rules:
 
       const narrationWithGames = appendGameSuggestionBlock(narrativeResponse.narration, userQuery, 'read');
       const { cleanedText, suggestions } = parseResponseMetadata(narrationWithGames);
-      const baseSuggestions = suggestions.slice(0, 3);
+      const bookSummarySuggestion = buildBookSummarySuggestion(userQuery);
+      const baseSuggestions = [bookSummarySuggestion, ...suggestions]
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .filter((value, index, list) => list.indexOf(value) === index)
+        .slice(0, 3);
       
       const audioBase64 = '';
 
@@ -3622,7 +3834,7 @@ Dashboard rules:
       void (async () => {
         const generatedSuggestions = await generateSuggestions(userQuery, detectedRequestLanguage, chatHistory);
         const fallbackSuggestions = buildSuggestionFallback(userQuery);
-        const mergedSuggestions = [...baseSuggestions, ...generatedSuggestions, ...fallbackSuggestions]
+        const mergedSuggestions = [bookSummarySuggestion, ...baseSuggestions, ...generatedSuggestions, ...fallbackSuggestions]
           .map((item) => item.trim())
           .filter(Boolean)
           .filter((value, index, list) => list.indexOf(value) === index)
@@ -3669,6 +3881,17 @@ Dashboard rules:
   };
 
   const handleToolSelect = (tool: string) => {
+    if (isServiceLocked) return;
+    if (disabledToolIds.includes(tool)) return;
+
+    if (tool === 'text') {
+      setSelectedTool(null);
+      setSelectedModel('auto');
+      setSettings((prev) => ({ ...prev, aiModel: AIModel.AUTO }));
+      startNewChatSession(false);
+      return;
+    }
+
     // Create a new session with tool heading
     setSelectedTool(tool);
     setSelectedModel('auto');
@@ -3713,6 +3936,28 @@ Ready to assist with dashboard creation.
     };
     setMessages([toolMsg]);
   };
+
+  useEffect(() => {
+    if (selectedTool && disabledToolIds.includes(selectedTool)) {
+      setSelectedTool(null);
+    }
+  }, [disabledToolIds, selectedTool]);
+
+  useEffect(() => {
+    if (interactionMode === 'listen' && disabledToolIds.includes('listen')) {
+      setInteractionMode('read');
+      setMicMuted(true);
+      stopRecognition();
+      stopMicAnalyser();
+      setListenStatus('idle');
+      return;
+    }
+
+    if (interactionMode === 'read' && disabledToolIds.includes('read') && !disabledToolIds.includes('listen')) {
+      setInteractionMode('listen');
+      setMicMuted(false);
+    }
+  }, [disabledToolIds, interactionMode]);
 
   const mapSelectedModelToProvider = (model: string): AIModel => {
     if (model === 'auto') return AIModel.AUTO;
@@ -3958,6 +4203,11 @@ Ready to assist with dashboard creation.
     if (!transcript.trim() || isLoading) return;
 
     initAudio();
+    const selectedNarrationTypeAtRequest = resolveNarrationType(settings.narrationType);
+    if (selectedNarrationTypeAtRequest !== 'Realistic') {
+      listenRealisticFollowUpRef.current = null;
+    }
+    const pendingRealisticFollowUp = listenRealisticFollowUpRef.current;
     const inferredLanguage = inferLanguageFromTranscript(transcript);
     const effectiveLanguage = inferredLanguage || activeLanguageRef.current || Language.ENGLISH;
     activeLanguageRef.current = effectiveLanguage;
@@ -4018,8 +4268,30 @@ Ready to assist with dashboard creation.
           }
         : undefined;
 
+      const shouldUseRealisticInteractiveFlow = selectedNarrationTypeAtRequest === 'Realistic';
+      const shouldAskClarifyingQuestion = shouldUseRealisticInteractiveFlow && !pendingRealisticFollowUp;
+      const resolvedQuery = shouldAskClarifyingQuestion
+        ? `You are in voice listen mode with realistic narration style.
+User request: "${transcript}"
+
+Ask exactly ONE concise clarifying question before giving any solution.
+Rules:
+- Output only the question sentence.
+- Do not provide analysis, options, or solution yet.
+- End with a question mark.`
+        : shouldUseRealisticInteractiveFlow && pendingRealisticFollowUp
+          ? `Original user request: "${pendingRealisticFollowUp.baseQuery}"
+Assistant clarifying question: "${pendingRealisticFollowUp.clarifyingQuestion}"
+User clarification: "${transcript}"
+
+Now provide the complete realistic solution.
+Rules:
+- Do not ask another clarifying question.
+- Give direct, practical guidance based on the combined context.`
+          : transcript;
+
       const narrativeResponse = await generateNarrative(
-        transcript,
+        resolvedQuery,
         currentMode,
         { ...settings, language: effectiveLanguage },
         existingConversation.slice(-6).map((entry) => ({ role: entry.role, content: entry.content })),
@@ -4051,10 +4323,31 @@ Ready to assist with dashboard creation.
         }
       }
 
-      const narrationWithGames = appendGameSuggestionBlock(narrativeResponse.narration, transcript, 'listen');
+      const narrationWithGames = shouldAskClarifyingQuestion
+        ? narrativeResponse.narration
+        : appendGameSuggestionBlock(narrativeResponse.narration, transcript, 'listen');
       const { cleanedText, voiceProfile } = parseResponseMetadata(narrationWithGames);
       const genre = voiceProfile.genre;
       lastNarrationRef.current = cleanedText;
+
+      const baseQueryForBookSuggestion = pendingRealisticFollowUp?.baseQuery || transcript;
+      const listenBookSuggestion = buildBookSummarySuggestion(baseQueryForBookSuggestion);
+      const listenSuggestions = shouldAskClarifyingQuestion
+        ? (existingItem?.suggestions || [])
+        : [listenBookSuggestion]
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .filter((value, index, list) => list.indexOf(value) === index)
+            .slice(0, 3);
+
+      if (shouldAskClarifyingQuestion) {
+        listenRealisticFollowUpRef.current = {
+          baseQuery: transcript,
+          clarifyingQuestion: cleanedText,
+        };
+      } else if (shouldUseRealisticInteractiveFlow && pendingRealisticFollowUp) {
+        listenRealisticFollowUpRef.current = null;
+      }
 
       const excerpt = getTtsExcerpt(cleanedText, "listen");
       const startListenNarration = async () => {
@@ -4109,6 +4402,8 @@ Ready to assist with dashboard creation.
         interactionMode: "listen",
         timestamp: now,
         response: cleanedText,
+        suggestions: listenSuggestions,
+        suggestion: listenSuggestions[0],
         genre,
         modelUsed: resolvedModel || existingItem?.modelUsed,
         voiceProfile,
@@ -4898,20 +5193,6 @@ Ready to assist with dashboard creation.
                                 enableSlider
                               />
                             )}
-                            {selectedTool === 'dashboard' && msg.id === latestDashboardAssistantMessageId && dashboardChatSuggestionPills.length > 0 && (
-                              <div className="mt-3 flex flex-wrap gap-2" role="list" aria-label="Dashboard customization suggestions">
-                                {dashboardChatSuggestionPills.map((pill) => (
-                                  <button
-                                    key={pill}
-                                    type="button"
-                                    onClick={() => handleReadSuggestionClick(pill)}
-                                    className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted-strong)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
-                                  >
-                                    {pill}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         ) : (
                           displayContent
@@ -5011,7 +5292,7 @@ Ready to assist with dashboard creation.
                   )}
                 </div>
               )}
-              {!isLoading && readSuggestions.length > 0 && userMessages.length < 10 && (
+              {!isLoading && readSuggestions.length > 0 && userMessages.length < 10 && selectedTool !== 'dashboard' && (
                 <div className="flex flex-col gap-2">
                   <p className="text-[10px] uppercase tracking-widest text-[var(--muted)]">Suggested next</p>
                   <div className="flex flex-wrap gap-2">
@@ -5227,12 +5508,24 @@ Ready to assist with dashboard creation.
                 <div className="flex min-w-0 gap-2 items-start w-full">
                   <div className="flex-1 min-w-0">
                     <SearchBar 
-                      disabled={userMessages.length >= 10}
-                      placeholder={userMessages.length >= 10 ? "Limit reached - start new chat" : "Ask a story, case, or question..."}
+                      disabled={userMessages.length >= 10 || isServiceLocked}
+                      placeholder={isServiceLocked
+                        ? "Your account is locked by super admin"
+                        : userMessages.length >= 10
+                          ? "Limit reached - start new chat"
+                          : selectedTool === 'ocr'
+                            ? "Explain with example, diagram, chart, table..."
+                            : selectedTool === 'dashboard'
+                              ? "Create dashboard..."
+                              : selectedTool === 'image'
+                                ? "Create image..."
+                                : "Ask a story, case, or question..."}
                       onNewTopic={messages.length > 0 ? startNewChatSession : undefined}
                       selectedTool={selectedTool}
                       selectedModel={selectedModel}
                       disabledModelIds={disabledModelIds}
+                      disabledToolIds={disabledToolIds}
+                      enabledModelsByTool={enabledModelsByTool}
                       currentMode={selectedTool || 'text'}
                       preferredTextProvider={settings.aiModel}
                       isNewChat={messages.length === 0}
@@ -5262,6 +5555,16 @@ Ready to assist with dashboard creation.
                   <div className="absolute inset-0 bg-[var(--background)]/30 rounded-2xl pointer-events-none" />
                 )}
               </div>
+              {isServiceLocked && (
+                <p className="mt-2 text-[11px] text-center text-red-400 uppercase tracking-wider">
+                  Access locked by super admin
+                </p>
+              )}
+              {sessionResponsePolicy?.limit !== null && !isServiceLocked && (
+                <p className="mt-1 text-[10px] text-center text-[var(--muted)] uppercase tracking-wider">
+                  Session responses: {sessionResponsePolicy?.used ?? 0}/{sessionResponsePolicy?.limit ?? 0}
+                </p>
+              )}
               <p className="text-[10px] text-center text-[var(--muted)] mt-3 uppercase tracking-widest">
                 Processing in {settings.language} Language
               </p>
@@ -5341,6 +5644,29 @@ Ready to assist with dashboard creation.
                 );
                 })}
               </div>
+
+              {!!selectedHistory.suggestions?.length && (
+                <div className="pt-2 border-t border-[var(--border)]">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--muted)] mb-2">Suggested book to summarize</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedHistory.suggestions.slice(0, 3).map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => {
+                          stopNarration();
+                          setSelectedHistory(null);
+                          setInteractionMode('listen');
+                          void handleListenTranscriptRef.current(suggestion);
+                        }}
+                        className="px-3 py-1.5 rounded-full border border-[var(--border)] text-xs text-[var(--muted-strong)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

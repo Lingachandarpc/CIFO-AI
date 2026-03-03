@@ -146,9 +146,9 @@ export const NARRATION_SETTINGS: Record<
     stability: 0.5,
     similarity_boost: 0.8, // More variation in tone
   },
-  Dramatic: {
-    stability: 0.4,
-    similarity_boost: 0.9, // High expression with character consistency
+  Practical: {
+    stability: 0.58,
+    similarity_boost: 0.84, // Balanced, clear, and grounded delivery
   },
   Educational: {
     stability: 0.7,
@@ -164,7 +164,7 @@ export async function generateSpeechWithElevenLabs(
   text: string,
   voiceType: string,
   language: Language,
-  narrationType: 'Realistic' | 'Dramatic' | 'Educational' | 'Personalized',
+  narrationType: 'Realistic' | 'Practical' | 'Educational' | 'Personalized',
   voiceGender: VoiceGender = VoiceGender.AUTO
 ): Promise<ElevenLabsTtsAudioPayload> {
   try {

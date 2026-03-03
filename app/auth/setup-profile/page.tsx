@@ -309,7 +309,7 @@ export default function SetupProfile() {
                   Response Style
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  {["Realistic", "Dramatic", "Educational", "Personalized"].map((style) => (
+                  {["Realistic", "Practical", "Educational", "Personalized"].map((style) => (
                     <button
                       key={style}
                       onClick={() =>

@@ -1,6 +1,9 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../../services/authOptions";
+import { enforceUsagePolicy } from "../../../../lib/usagePolicy";
 
 export async function POST(req: Request) {
   const key = process.env.OPENAI_API_KEY;
@@ -9,6 +12,20 @@ export async function POST(req: Request) {
   }
 
   try {
+    const session = await getServerSession(authOptions);
+    const authEmail = session?.user?.email || null;
+    if (authEmail) {
+      const policyCheck = await enforceUsagePolicy({
+        request: req,
+        userEmail: authEmail,
+        toolType: "listen",
+        modelId: "tts-1",
+      });
+      if (!policyCheck.allowed) {
+        return policyCheck.response;
+      }
+    }
+
     const { text, voice } = await req.json();
 
     const res = await fetch('https://api.openai.com/v1/audio/speech', {

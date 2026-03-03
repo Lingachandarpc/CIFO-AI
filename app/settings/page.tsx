@@ -18,6 +18,14 @@ const defaultSettings: Settings = {
   enableWebSearch: true,
 };
 
+const resolveNarrationType = (value?: string): Settings["narrationType"] => {
+  if (value === "Practical") return "Practical";
+  if (value === "Educational") return "Educational";
+  if (value === "Personalized") return "Personalized";
+  if (value === "Dramatic") return "Practical";
+  return "Realistic";
+};
+
 type ProfileForm = {
   name: string;
   age: string;
@@ -108,7 +116,12 @@ export default function SettingsPage() {
               loadedModel === AIModel.AUTO
                 ? loadedModel
                 : AIModel.AUTO;
-            setSettings((prev) => ({ ...prev, ...settingsData.settings, aiModel: safeModel }));
+            setSettings((prev) => ({
+              ...prev,
+              ...settingsData.settings,
+              aiModel: safeModel,
+              narrationType: resolveNarrationType(settingsData.settings.narrationType),
+            }));
           }
         }
 
@@ -327,7 +340,7 @@ export default function SettingsPage() {
             <div>
               <label className="block text-sm font-semibold text-[var(--muted-strong)] mb-2">Response Style</label>
               <div className="grid grid-cols-2 gap-3">
-                {(["Realistic", "Dramatic", "Educational", "Personalized"] as Settings["narrationType"][]).map((type) => (
+                {(["Realistic", "Practical", "Educational", "Personalized"] as Settings["narrationType"][]).map((type) => (
                   <button
                     key={type}
                     type="button"

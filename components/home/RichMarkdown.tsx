@@ -313,16 +313,47 @@ const DiagramBlockView = ({ raw }: { raw: string }) => {
   const [hasError, setHasError] = useState(false);
   const renderId = useMemo(() => `mermaid-${Math.random().toString(36).slice(2, 10)}`, []);
 
+  const sanitizeMermaidSource = (source: string) => {
+    const trimmed = String(source || '').trim();
+    return trimmed
+      .replace(/^```(?:mermaid|diagram)?\s*/i, '')
+      .replace(/```$/i, '')
+      .replace(/^mermaid\s*\n/i, '')
+      .trim();
+  };
+
+  const isMermaidErrorSvg = (candidateSvg: string) => {
+    const normalized = String(candidateSvg || '').toLowerCase();
+    return normalized.includes('syntax error in text')
+      || normalized.includes('mermaid version')
+      || normalized.includes('class="error-icon"')
+      || normalized.includes('id="error"');
+  };
+
   useEffect(() => {
     let mounted = true;
 
     const renderDiagram = async () => {
       try {
+        const source = sanitizeMermaidSource(raw);
+        if (!source) {
+          setSvg('');
+          setHasError(true);
+          return;
+        }
+
         const mermaidModule = await import('mermaid');
         const mermaid = mermaidModule.default;
         mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'dark' });
-        const result = await mermaid.render(renderId, raw);
+        const result = await mermaid.render(renderId, source);
         if (!mounted) return;
+
+        if (!result?.svg || isMermaidErrorSvg(result.svg)) {
+          setSvg('');
+          setHasError(true);
+          return;
+        }
+
         setSvg(result.svg);
         setHasError(false);
       } catch (error) {

@@ -1,9 +1,12 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../../services/authOptions";
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
+import { enforceUsagePolicy } from "../../../../lib/usagePolicy";
 
 export async function POST(req: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -12,6 +15,20 @@ export async function POST(req: Request) {
   }
 
   try {
+    const session = await getServerSession(authOptions);
+    const authEmail = session?.user?.email || null;
+    if (authEmail) {
+      const policyCheck = await enforceUsagePolicy({
+        request: req,
+        userEmail: authEmail,
+        toolType: "listen",
+        modelId: "whisper-1",
+      });
+      if (!policyCheck.allowed) {
+        return policyCheck.response;
+      }
+    }
+
     const formData = await req.formData();
     const audioFile = formData.get("file") as File | null;
     const language = formData.get("language") as string | null;

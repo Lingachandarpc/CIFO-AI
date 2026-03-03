@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
 import { processAIToolRequest, AIToolRequest } from '@/app/services/aiToolsService';
+import { authOptions } from '@/app/services/authOptions';
+import { enforceUsagePolicy, incrementSessionResponseUsage } from '@/lib/usagePolicy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,6 +10,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as AIToolRequest;
+    const authSession = await getServerSession(authOptions);
+    const authEmail = authSession?.user?.email || null;
 
     // Validate request
     if (!body.type) {
@@ -14,6 +19,20 @@ export async function POST(request: NextRequest) {
         { error: 'Missing tool type' },
         { status: 400 }
       );
+    }
+
+    if (authEmail) {
+      const modelId = typeof body?.options?.model === 'string' ? body.options.model : null;
+      const policyCheck = await enforceUsagePolicy({
+        request,
+        userEmail: authEmail,
+        toolType: body.type,
+        modelId,
+      });
+
+      if (!policyCheck.allowed) {
+        return policyCheck.response;
+      }
     }
 
     // Process request based on type
@@ -24,6 +43,10 @@ export async function POST(request: NextRequest) {
         { error: result.error },
         { status: 400 }
       );
+    }
+
+    if (authEmail) {
+      await incrementSessionResponseUsage(request, authEmail).catch(() => undefined);
     }
 
     return NextResponse.json(result);

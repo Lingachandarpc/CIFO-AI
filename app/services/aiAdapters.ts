@@ -153,8 +153,8 @@ export async function openaiAdapter(
   const narrativeStyleGuide = {
     Realistic:
       'Tell the story in a realistic, factual, and grounded manner with real-world examples.',
-    Dramatic:
-      'Tell the story with dramatic flair, engaging tension, and emotional depth.',
+    Practical:
+      'Use a practical advisory style: identify real-world use cases, ask missing diagnostic questions, compare options with trade-offs, and summarize an honest action plan grounded in books/research/journal evidence when available.',
     Educational:
       'Tell the story in an educational style, focusing on learning outcomes and key insights.',
     Personalized:
@@ -261,7 +261,7 @@ Rules:
 - Respond only in ${options.language}. Never switch languages.
 - Plain text only (no markdown, no tables, no emojis, no code blocks).
 - For Realistic style: Provide factual, accurate, complete answers. Use web search data when provided. Be thorough but concise (3-8 sentences as needed).
-- For Dramatic style: 2-5 engaging sentences with emotional depth.
+- For Practical style: If key details are missing, ask 2-5 targeted questions first (for example: product type, target audience, competitors, budget, timeline). If enough context exists, provide actionable options, trade-offs, and a realistic next-step plan.
 - For Educational style: 3-6 clear sentences focusing on key learning points.
 - For Personalized style: 3-7 sentences tailored to user profile context (interests, pulse, bio, age, location) without inventing facts.
 - Keep it crisp and conversational, suitable for audio narration.
@@ -280,6 +280,8 @@ Instructions:
 - Narrative Style: ${options.narrationType}
 - Language: ${options.language}
 - ${styleInstruction}
+- For Practical style: prioritize query-relevant real use cases and how people solved similar problems. Include references to books, research papers, journals, or validated industry reports when available from context/web results. If not available, explicitly state assumptions and avoid fabricating citations.
+- For Practical style: frame the user into decision choices (Option A/B/C), show pros/cons, risks, and a practical recommendation with honest constraints.
 - If style is Personalized, explicitly reference relevant user context naturally (interests/pulse/bio/location/age) where helpful.
 - Keep the narration engaging, clear, and suitable for reading
 - Target length: 300-500 words

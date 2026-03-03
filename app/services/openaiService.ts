@@ -62,8 +62,11 @@ export async function generateNarrative(
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
       console.error('AI proxy error:', payload);
+      const errorMessage = typeof payload?.error === 'string' && payload.error.trim()
+        ? payload.error.trim()
+        : 'Sorry — AI is unavailable right now.';
       return {
-        narration: 'Sorry — AI is unavailable right now.',
+        narration: errorMessage,
         failedModels: Array.isArray(payload?.failedModels) ? payload.failedModels : [],
       };
     }

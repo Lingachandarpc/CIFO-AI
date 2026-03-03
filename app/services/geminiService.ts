@@ -273,7 +273,7 @@ export async function generateNarrativeWithWebSearch(
 
     const narrativeStyleGuide: Record<string, string> = {
       'Realistic': 'Tell the story in a realistic, factual, and grounded manner with real-world examples.',
-      'Dramatic': 'Tell the story with dramatic flair, engaging tension, and emotional depth.',
+      'Practical': 'Use a practical advisory style: identify real-world use cases, ask missing diagnostic questions, compare options with trade-offs, and summarize an honest action plan grounded in books/research/journal evidence when available.',
       'Educational': 'Tell the story in an educational style, focusing on learning outcomes and key insights. In READ mode, use advanced formatting (tables/charts/tabs/progress/diagrams) only when it genuinely improves understanding.',
       'Personalized': 'Tailor the response to the user profile context (age, interests, personality pulse, bio, location) while staying factual and helpful.',
     };
@@ -357,7 +357,7 @@ ${styleInstruction}
 Rules:
 - Plain text only (no markdown, no tables, no emojis, no code blocks).
 - For Realistic style: 2-5 sentences maximum. Be concise but complete. Prioritize web search data.
-- For Dramatic style: 2-5 engaging sentences with emotional depth.
+- For Practical style: If key details are missing, ask 2-5 targeted diagnostic questions first. If context is sufficient, provide options with pros/cons and a realistic action plan.
 - For Educational style: 3-6 clear sentences focusing on key learning points.
 - For Personalized style: 3-7 sentences tailored to known user profile fields (interests, pulse, bio, age, location).
 - Keep it crisp and conversational, suitable for audio narration.
@@ -391,6 +391,9 @@ Instructions:
 - Narrative Style: ${narrationType}
 - Language: ${language}
 - ${styleInstruction}
+- For Practical style: prioritize query-relevant real-world use cases and how people solved similar situations.
+- For Practical style: include references from books, research papers, journals, or credible industry reports when available from web/attachment context. If not available, clearly state assumptions and do not fabricate citations.
+- For Practical style: present decision choices (Option A/B/C), trade-offs, risks, and a practical recommendation.
 - If style is Personalized, naturally reference relevant user profile context where appropriate.
 ${narrationType === 'Realistic' ? '- Length: 2-15 lines. Be comprehensive but concise.' : `- Duration: approximately ${narrationTime} minutes`}
 - Keep the narration engaging, clear, and suitable for reading

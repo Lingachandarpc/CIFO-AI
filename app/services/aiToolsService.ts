@@ -928,6 +928,13 @@ export async function performOCR(imageData: Buffer | string, options?: {
       const normalizedRaw = raw.trim();
       if (!normalizedRaw) return null;
 
+      const unquote = (value: string) => {
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          return value.slice(1, -1).trim();
+        }
+        return value;
+      };
+
       const parseJsonText = (jsonText: string): GoogleServiceAccount | null => {
         try {
           const parsed = JSON.parse(jsonText) as GoogleServiceAccount;
@@ -940,21 +947,23 @@ export async function performOCR(imageData: Buffer | string, options?: {
         }
       };
 
-      if (normalizedRaw.startsWith('{') && normalizedRaw.endsWith('}')) {
-        return parseJsonText(normalizedRaw);
+      const candidateRaw = unquote(normalizedRaw);
+
+      if (candidateRaw.startsWith('{') && candidateRaw.endsWith('}')) {
+        return parseJsonText(candidateRaw);
       }
 
       try {
-        const decoded = Buffer.from(normalizedRaw, 'base64').toString('utf8').trim();
+        const decoded = Buffer.from(candidateRaw, 'base64').toString('utf8').trim();
         if (decoded.startsWith('{') && decoded.endsWith('}')) {
           return parseJsonText(decoded);
         }
       } catch {
       }
 
-      if (normalizedRaw.endsWith('.json') && existsSync(normalizedRaw)) {
+      if (candidateRaw.endsWith('.json') && existsSync(candidateRaw)) {
         try {
-          const content = readFileSync(normalizedRaw, 'utf8');
+          const content = readFileSync(candidateRaw, 'utf8');
           return parseJsonText(content);
         } catch {
           return null;
@@ -966,10 +975,10 @@ export async function performOCR(imageData: Buffer | string, options?: {
 
     const getServiceAccountFromVisionEnv = (): GoogleServiceAccount | null => {
       const credentialCandidates = [
-        process.env.GOOGLE_TTS_SERVICE_ACCOUNT_JSON,
-        process.env.GOOGLE_VISION_SERVICE_ACCOUNT_JSON,
         process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+        process.env.GOOGLE_VISION_SERVICE_ACCOUNT_JSON,
         process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        process.env.GOOGLE_TTS_SERVICE_ACCOUNT_JSON,
       ].filter((value): value is string => Boolean(value && value.trim()));
 
       for (const configured of credentialCandidates) {
@@ -1019,7 +1028,7 @@ export async function performOCR(imageData: Buffer | string, options?: {
     if (!accessToken) {
       return {
         success: false,
-        error: 'Google Vision credentials are missing. Set GOOGLE_VISION_SERVICE_ACCOUNT_JSON (or GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_TTS_SERVICE_ACCOUNT_JSON / GOOGLE_APPLICATION_CREDENTIALS) or OAuth env vars (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN).',
+        error: 'Google Vision credentials are missing. Set GOOGLE_SERVICE_ACCOUNT_JSON (or GOOGLE_VISION_SERVICE_ACCOUNT_JSON / GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_TTS_SERVICE_ACCOUNT_JSON) or OAuth env vars (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN).',
         type: 'ocr',
         processingTime: Date.now() - startTime,
         provider: 'google-vision',

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 
-export type AIToolType = "image" | "video" | "ocr" | "document" | "dashboard";
+export type AIToolType = "text" | "image" | "video" | "ocr" | "document" | "dashboard";
 
 interface AttachedFile {
   id: string;
@@ -30,17 +30,23 @@ interface AIModel {
 
 const TOOL_OPTIONS: ToolOption[] = [
   {
+    type: "text",
+    label: "Text Chat",
+    icon: "💬",
+    description: "General AI assistant conversation",
+  },
+  {
     type: "image",
     label: "Image Creation",
     icon: "🎨",
     description: "Generate images with Gemini or Grok",
   },
-  // {
-  //   type: "video",
-  //   label: "Video Creation",
-  //   icon: "🎬",
-  //   description: "Create videos with Veo or text-to-video",
-  // },
+  {
+    type: "video",
+    label: "Video Creation",
+    icon: "🎬",
+    description: "Create videos with Veo or text-to-video",
+  },
   {
     type: "ocr",
     label: "OCR",
@@ -76,18 +82,24 @@ const AI_MODELS: AIModel[] = [
   { id: "grok-imagine-video", label: "Grok Imagine Video (xAI)", provider: "xAI", modes: ["video"], description: "Creative short video generation" },
   // CHAT MODELS
   { id: "gpt-4", label: "GPT-4 Turbo", provider: "OpenAI", modes: ["text", "document"], description: "Best for complex reasoning & analysis" },
+  { id: "gpt-4-turbo", label: "GPT-4 Turbo (Router)", provider: "OpenAI", modes: ["text", "document"], description: "High-quality routed text model" },
   { id: "gpt-3.5", label: "GPT-3.5 Turbo", provider: "OpenAI", modes: ["text", "document"], description: "Fast & cost-effective for simple queries" },
+  { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo (Router)", provider: "OpenAI", modes: ["text", "document"], description: "Budget routed text model" },
   { id: "claude-opus", label: "Claude 3 Opus", provider: "Anthropic", modes: ["text", "document"], description: "Most capable — deep research & writing" },
+  { id: "claude-3-opus", label: "Claude 3 Opus (Registry)", provider: "Anthropic", modes: ["text", "document"], description: "Registry text model id" },
   { id: "claude-sonnet", label: "Claude 3 Sonnet", provider: "Anthropic", modes: ["text", "document"], description: "Balanced — great for most tasks" },
+  { id: "claude-3-sonnet", label: "Claude 3 Sonnet (Registry)", provider: "Anthropic", modes: ["text", "document"], description: "Registry text model id" },
   { id: "claude-haiku", label: "Claude 3 Haiku", provider: "Anthropic", modes: ["text", "document"], description: "Fastest Claude — quick answers & summaries" },
+  { id: "claude-3-haiku", label: "Claude 3 Haiku (Registry)", provider: "Anthropic", modes: ["text", "document"], description: "Registry text model id" },
   { id: "gemini-pro", label: "Gemini 1.5 Pro", provider: "Google", modes: ["text", "document"], description: "Long context & multimodal — best for large docs" },
+  { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro (Registry)", provider: "Google", modes: ["text", "document"], description: "Registry text model id" },
   { id: "gemini-flash", label: "Gemini 1.5 Flash", provider: "Google", modes: ["text", "document"], description: "Ultra-fast with good accuracy" },
+  { id: "gemini-1.5-flash", label: "Gemini 1.5 Flash (Registry)", provider: "Google", modes: ["text", "document"], description: "Registry text model id" },
   { id: "grok-1", label: "Grok-1", provider: "xAI", modes: ["text", "document"], description: "Real-time knowledge & witty responses" },
+  { id: "grok-3", label: "Grok-3", provider: "xAI", modes: ["text", "document"], description: "Latest xAI routed text model" },
 ];
 
 export { type AttachedFile };
-
-const ATTACHMENTS_SESSION_KEY = "chronoread.searchbar.attachments";
 
 interface SearchBarProps {
   onSearch: (query: string, attachments?: AttachedFile[]) => void;
@@ -99,6 +111,8 @@ interface SearchBarProps {
   selectedTool?: string | null;
   selectedModel?: string;
   disabledModelIds?: string[];
+  disabledToolIds?: string[];
+  enabledModelsByTool?: Record<string, string[]>;
   currentMode?: string; // 'text' | 'image' | 'video' | 'ocr' | 'document'
   preferredTextProvider?: string; // 'auto' | 'openai' | 'claude-sonnet' | 'gemini' | 'xai'
   disabled?: boolean;
@@ -118,6 +132,8 @@ export default function SearchBar({
   selectedTool,
   selectedModel = "auto",
   disabledModelIds = [],
+  disabledToolIds = [],
+  enabledModelsByTool = {},
   currentMode = "text",
   preferredTextProvider = "auto",
   disabled = false,
@@ -130,19 +146,9 @@ export default function SearchBar({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isToolMenuOpen, setIsToolMenuOpen] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [availableModels, setAvailableModels] = useState<AIModel[]>(AI_MODELS);
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const raw = sessionStorage.getItem(ATTACHMENTS_SESSION_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw) as AttachedFile[];
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((file) => !!file?.name && !!file?.base64);
-    } catch {
-      return [];
-    }
-  });
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [imageConfig, setImageConfig] = useState({ size: '1024x1024', quality: 'standard', style: 'natural' });
   const [videoConfig, setVideoConfig] = useState({ duration: 5, resolution: '1080p', aspectRatio: '16:9' });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -156,20 +162,75 @@ export default function SearchBar({
     }
   }, [prefillQuery]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadModels = async () => {
+      try {
+        const response = await fetch('/api/chronoread/models', { cache: 'no-store' });
+        if (!response.ok) return;
+        const payload = await response.json() as {
+          models?: Array<{
+            id: string;
+            displayName?: string;
+            provider?: string;
+            description?: string;
+            categories?: string[];
+          }>;
+        };
+
+        const toModes = (categories: string[] = []): Array<"text" | AIToolType> => {
+          const modes = new Set<Array<"text" | AIToolType>[number]>();
+          categories.forEach((category) => {
+            const normalized = String(category || '').toLowerCase();
+            if (normalized === 'text' || normalized === 'vision') {
+              modes.add('text');
+              modes.add('document');
+            }
+            if (normalized === 'image') modes.add('image');
+            if (normalized === 'video') modes.add('video');
+            if (normalized === 'ocr') modes.add('ocr');
+          });
+          return modes.size ? Array.from(modes) : ['text'];
+        };
+
+        const apiModels: AIModel[] = Array.isArray(payload.models)
+          ? payload.models.map((model) => ({
+              id: model.id,
+              label: model.displayName || model.id,
+              provider: model.provider || 'AI',
+              modes: toModes(model.categories || []),
+              description: model.description,
+            }))
+          : [];
+
+        if (!isMounted) return;
+
+        const merged = [
+          ...AI_MODELS,
+          ...apiModels,
+        ].reduce<AIModel[]>((acc, model) => {
+          if (!acc.find((entry) => entry.id.toLowerCase() === model.id.toLowerCase())) {
+            acc.push(model);
+          }
+          return acc;
+        }, []);
+
+        setAvailableModels(merged);
+      } catch {
+      }
+    };
+
+    void loadModels();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Calculate line count
   const lineCount = query.split("\n").length;
   const shouldShowExpandButton = lineCount > 5;
-
-  useEffect(() => {
-    try {
-      if (!attachedFiles.length) {
-        sessionStorage.removeItem(ATTACHMENTS_SESSION_KEY);
-        return;
-      }
-      sessionStorage.setItem(ATTACHMENTS_SESSION_KEY, JSON.stringify(attachedFiles));
-    } catch {
-    }
-  }, [attachedFiles]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -256,8 +317,25 @@ export default function SearchBar({
     setShowConfigModal(false);
   };
 
+  const clearAttachments = () => {
+    setAttachedFiles([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleNewTopicClick = () => {
+    clearAttachments();
+    onNewTopic?.();
+  };
+
   const handleToolClick = (tool: string) => {
-    onToolSelect?.(tool);
+    clearAttachments();
+    if (tool === "text") {
+      onToolSelect?.("text");
+    } else {
+      onToolSelect?.(tool);
+    }
     setIsToolMenuOpen(false);
   };
 
@@ -270,23 +348,65 @@ export default function SearchBar({
     setIsExpanded(!isExpanded);
   };
 
-  const currentModel = AI_MODELS.find((m) => m.id === selectedModel) || AI_MODELS[0];
+  const currentModel = availableModels.find((m) => m.id === selectedModel) || availableModels[0];
 
   // Get recommended models based on current mode
   const getModeRecommendedModels = () => {
     const activeMode: "text" | AIToolType =
-      currentMode === "image" || currentMode === "video" || currentMode === "ocr" || currentMode === "document"
+      currentMode === "image" || currentMode === "video" || currentMode === "ocr" || currentMode === "document" || currentMode === "text"
         ? currentMode
         : "text";
 
-    const modeModels = AI_MODELS.filter((model) => model.modes.includes(activeMode));
+    const modeModels = availableModels.filter((model) => model.modes.includes(activeMode));
+
+    const toolForRestriction = String(
+      currentMode && currentMode !== "text"
+        ? currentMode
+        : "text"
+    ).toLowerCase();
+    const enabledForTool = Array.isArray(enabledModelsByTool?.[toolForRestriction])
+      ? enabledModelsByTool[toolForRestriction]
+      : Array.isArray(enabledModelsByTool?.text)
+        ? enabledModelsByTool.text
+        : null;
+
+    const withAdminCustomModels = (() => {
+      if (!enabledForTool || enabledForTool.length === 0) return modeModels;
+
+      const existingIds = new Set(modeModels.map((model) => model.id.toLowerCase()));
+      const customModels: AIModel[] = enabledForTool
+        .filter((modelId) => !existingIds.has(modelId.toLowerCase()))
+        .map((modelId) => ({
+          id: modelId,
+          label: modelId,
+          provider: "Admin",
+          modes: [activeMode],
+          description: "Enabled by super admin",
+        }));
+
+      return [...modeModels, ...customModels];
+    })();
+
+    const restrictedModeModels = enabledForTool && enabledForTool.length > 0
+      ? withAdminCustomModels.filter((model) => model.id === "auto" || enabledForTool.includes(model.id.toLowerCase()))
+      : withAdminCustomModels;
 
     if (activeMode === 'ocr') {
-      return modeModels.filter((model) => model.id === 'auto' || model.id === 'google-vision-ocr' || model.id === 'ocr-extended-response');
+      const requiredOcrModelIds = new Set(['auto', 'google-vision-ocr', 'ocr-extended-response']);
+      const requiredOcrDefaults = AI_MODELS.filter((model) => requiredOcrModelIds.has(model.id));
+
+      const mergedOcrModels = [...restrictedModeModels, ...requiredOcrDefaults].reduce<AIModel[]>((acc, model) => {
+        if (!acc.some((entry) => entry.id.toLowerCase() === model.id.toLowerCase())) {
+          acc.push(model);
+        }
+        return acc;
+      }, []);
+
+      return mergedOcrModels.filter((model) => requiredOcrModelIds.has(model.id));
     }
 
     if (activeMode !== "text" || preferredTextProvider === "auto") {
-      return modeModels;
+      return restrictedModeModels;
     }
 
     const isProviderMatch = (modelId: string) => {
@@ -298,7 +418,7 @@ export default function SearchBar({
       return true;
     };
 
-    return modeModels.filter((model) => isProviderMatch(model.id));
+    return restrictedModeModels.filter((model) => isProviderMatch(model.id));
   };
 
   const recommendedModels = getModeRecommendedModels();
@@ -332,7 +452,7 @@ export default function SearchBar({
               {onNewTopic && (
                 <button
                   type="button"
-                  onClick={onNewTopic}
+                  onClick={handleNewTopicClick}
                   disabled={disabled}
                   className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                   title="New topic"
@@ -367,21 +487,36 @@ export default function SearchBar({
                         <p className="text-xs uppercase tracking-wider text-[var(--muted)] font-semibold">New Session</p>
                       </div>
                       <div className="py-1 max-h-[min(18rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
-                        {TOOL_OPTIONS.map((tool) => (
+                        {TOOL_OPTIONS.filter((tool) => tool.type !== "text").map((tool) => {
+                          const isDisabledTool = disabledToolIds.includes(tool.type);
+                          return (
                           <button
                             key={tool.type}
-                            onClick={() => handleToolClick(tool.type)}
-                            className="w-full text-left px-3 py-2 hover:bg-[var(--surface-strong)] transition-colors text-sm"
+                            onClick={() => {
+                              if (!isDisabledTool) {
+                                handleToolClick(tool.type);
+                              }
+                            }}
+                            disabled={isDisabledTool}
+                            className={`w-full text-left px-3 py-2 transition-colors text-sm ${
+                              isDisabledTool
+                                ? "opacity-50 cursor-not-allowed text-[var(--muted)]"
+                                : "hover:bg-[var(--surface-strong)]"
+                            }`}
                           >
                             <div className="flex items-start gap-2">
                               <span className="text-lg mt-0.5 flex-shrink-0">{tool.icon}</span>
                               <div className="flex-1 min-w-0">
                                 <p className="font-medium text-[var(--foreground)]">{tool.label}</p>
-                                <p className="text-xs text-[var(--muted)] truncate">{tool.description}</p>
+                                <p className="text-xs text-[var(--muted)] truncate">
+                                  {tool.description}
+                                  {isDisabledTool ? " (Disabled by admin)" : ""}
+                                </p>
                               </div>
                             </div>
                           </button>
-                        ))}
+                        );
+                        })}
                       </div>
                     </div>
                   )}

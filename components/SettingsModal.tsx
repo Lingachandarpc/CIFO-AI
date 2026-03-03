@@ -113,13 +113,13 @@ export default function SettingsModal({ settings, onSettingsChange, onClose }: S
             Response Style
           </label>
           <div className="grid grid-cols-3 gap-3">
-            {['Realistic', 'Dramatic', 'Educational'].map((type) => (
+            {['Realistic', 'Practical', 'Educational'].map((type) => (
               <button
                 key={type}
                 onClick={() =>
                   onSettingsChange({
                     ...settings,
-                    narrationType: type as 'Realistic' | 'Dramatic' | 'Educational',
+                    narrationType: type as 'Realistic' | 'Practical' | 'Educational',
                   })
                 }
                 className={`p-2 rounded transition-all text-sm font-medium ${

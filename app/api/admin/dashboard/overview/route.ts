@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "../../../../../lib/prisma";
 import { isSuperAdminRequest } from "../../../../../lib/superAdminAuth";
 
+const SESSION_LIMITS_BY_TOOL_META_KEY = "__sessionResponseLimitsByTool";
+
 type UserAggregate = {
   id: number;
   email: string;
@@ -11,11 +13,61 @@ type UserAggregate = {
   tier: string;
   tokenBudget: number;
   tokensUsed: number;
+  serviceLocked: boolean;
+  sessionResponseLimit: number | null;
+  disabledTools: string[];
+  disabledModels: string[];
   createdAt: Date;
   chatCount: number;
   tokenRequestCount: number;
   lastActivityAt: Date | null;
 };
+
+function normalizeEnabledModelsByTool(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, string[]> = {};
+  for (const [rawTool, rawModels] of Object.entries(value as Record<string, unknown>)) {
+    if (rawTool === SESSION_LIMITS_BY_TOOL_META_KEY) continue;
+    const toolKey = String(rawTool || "").trim().toLowerCase();
+    const tool = toolKey === "read" ? "text" : toolKey;
+    if (tool === "ocr" || tool === "dashboard") continue;
+    if (!tool || !Array.isArray(rawModels)) continue;
+    normalized[tool] = rawModels
+      .map((item) => String(item || "").trim().toLowerCase())
+      .filter(Boolean)
+      .filter((item, index, list) => list.indexOf(item) === index);
+  }
+
+  return normalized;
+}
+
+function normalizeSessionResponseLimitsByTool(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const raw = (value as Record<string, unknown>)[SESSION_LIMITS_BY_TOOL_META_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const normalized: Record<string, number> = {};
+  for (const [rawTool, rawLimit] of Object.entries(raw as Record<string, unknown>)) {
+    const toolKey = String(rawTool || "").trim().toLowerCase();
+    const tool = toolKey === "read" ? "text" : toolKey;
+    if (!tool) continue;
+
+    const numericLimit = Number(rawLimit);
+    if (!Number.isInteger(numericLimit) || numericLimit < 0) continue;
+
+    normalized[tool] = numericLimit;
+  }
+
+  return normalized;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,7 +75,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [users, recentTokenUsage, recentChats] = await prisma.$transaction([
+    const [users, recentTokenUsage, recentChats, globalPolicy] = await prisma.$transaction([
       prisma.user.findMany({
         select: {
           id: true,
@@ -32,6 +84,10 @@ export async function GET(request: NextRequest) {
           tier: true,
           tokenBudget: true,
           tokensUsed: true,
+          serviceLocked: true,
+          sessionResponseLimit: true,
+          disabledTools: true,
+          disabledModels: true,
           createdAt: true,
           _count: {
             select: {
@@ -76,6 +132,9 @@ export async function GET(request: NextRequest) {
           },
         },
       }),
+      prisma.globalUsagePolicy.findFirst({
+        orderBy: { id: "asc" },
+      }),
     ]);
 
     const userLatestActivity = new Map<number, Date>();
@@ -106,6 +165,10 @@ export async function GET(request: NextRequest) {
         tier: user.tier,
         tokenBudget: user.tokenBudget,
         tokensUsed: user.tokensUsed,
+        serviceLocked: user.serviceLocked,
+        sessionResponseLimit: user.sessionResponseLimit,
+        disabledTools: user.disabledTools,
+        disabledModels: user.disabledModels,
         createdAt: user.createdAt,
         chatCount: user._count.chatHistory,
         tokenRequestCount: user._count.tokenUsage,
@@ -148,6 +211,14 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       summary,
+      globalPolicy: {
+        lockAllUsers: globalPolicy?.lockAllUsers ?? false,
+        defaultSessionResponseLimit: globalPolicy?.defaultSessionResponseLimit ?? null,
+        disabledTools: globalPolicy?.disabledTools ?? [],
+        disabledModels: globalPolicy?.disabledModels ?? [],
+        enabledModelsByTool: normalizeEnabledModelsByTool(globalPolicy?.enabledModelsByTool),
+        sessionResponseLimitsByTool: normalizeSessionResponseLimitsByTool(globalPolicy?.enabledModelsByTool),
+      },
       users: userData.map((user) => ({
         ...user,
         tokensRemaining: Math.max(0, user.tokenBudget - user.tokensUsed),

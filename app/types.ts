@@ -70,7 +70,7 @@ export enum Genre {
 }
 
 export interface Settings {
-  narrationType: "Realistic" | "Dramatic" | "Educational" | "Personalized";
+  narrationType: "Realistic" | "Practical" | "Educational" | "Personalized";
   voiceType: string;
   voiceGender: VoiceGender;
   language: Language;

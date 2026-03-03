@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import type { Prisma } from "@prisma/client";
 import { authOptions } from "../../../services/authOptions";
 import prisma from "../../../../lib/prisma";
+import { enforceUsagePolicy, incrementSessionResponseUsage } from "../../../../lib/usagePolicy";
 import {
   processQueryWithMiddleware,
   UserMindContext,
@@ -751,14 +752,28 @@ export async function POST(req: Request) {
       chatHistory = [],
     } = await req.json();
 
+    const authSession = await getServerSession(authOptions);
+    const authEmail = authSession?.user?.email || null;
+
+    if (authEmail) {
+      const policyCheck = await enforceUsagePolicy({
+        request: req,
+        userEmail: authEmail,
+        toolType: interactionMode === "listen" ? "listen" : "read",
+        modelId: selectedModel || aiModel,
+      });
+      if (!policyCheck.allowed) {
+        return policyCheck.response;
+      }
+    }
+
     // ========================================================================
     // Freemium Token Budget Check
     // ========================================================================
     try {
-      const budgetSession = await getServerSession(authOptions);
-      if (budgetSession?.user?.email) {
+      if (authEmail) {
         const budgetUser = await prisma.user.findUnique({
-          where: { email: budgetSession.user.email },
+          where: { email: authEmail },
           select: { tokenBudget: true, tokensUsed: true, tier: true, periodStart: true },
         });
         if (budgetUser) {
@@ -768,7 +783,7 @@ export async function POST(req: Request) {
           const monthsDiff = (now.getFullYear() - periodStart.getFullYear()) * 12 + (now.getMonth() - periodStart.getMonth());
           if (monthsDiff >= 1) {
             await prisma.user.update({
-              where: { email: budgetSession.user.email },
+              where: { email: authEmail },
               data: { tokensUsed: 0, periodStart: now },
             });
             budgetUser.tokensUsed = 0;
@@ -802,6 +817,9 @@ export async function POST(req: Request) {
 
     // Fast path: day-of-week queries should always be concise in every language
     if (isDayOfWeekQuery(query)) {
+      if (authEmail) {
+        await incrementSessionResponseUsage(req, authEmail).catch(() => undefined);
+      }
       const dayLine = formatDayOfWeekResponse(effectiveLanguage, new Date());
       return NextResponse.json({
         narration: dayLine,
@@ -1220,6 +1238,10 @@ export async function POST(req: Request) {
     // ========================================================================
     // Return Enhanced Response
     // ========================================================================
+    if (authEmail) {
+      await incrementSessionResponseUsage(req, authEmail).catch(() => undefined);
+    }
+
     return NextResponse.json({
       narration: enhancedResponse.narration,
       languageUsed: effectiveLanguage,

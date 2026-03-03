@@ -507,7 +507,7 @@ export default function Home() {
               <div className="space-y-3">
                 <label className="text-sm font-semibold text-neutral-400 block uppercase tracking-wider">Response Style</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {['Realistic', 'Dramatic', 'Educational', 'Personalized'].map((type) => (
+                  {['Realistic', 'Practical', 'Educational', 'Personalized'].map((type) => (
                     <button
                       key={type}
                       onClick={() => setSettings({ ...settings, narrationType: type as Settings['narrationType'] })}

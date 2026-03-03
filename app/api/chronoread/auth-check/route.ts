@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../services/authOptions'
+import { getEffectiveUsagePolicyForUserEmail } from '../../../../lib/usagePolicy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest) {
     const user = await prisma.user.findUnique({
       where: { email: session.user.email! },
     })
+    const policy = await getEffectiveUsagePolicyForUserEmail(req, session.user.email!)
 
     return NextResponse.json(
       {
@@ -31,6 +33,18 @@ export async function GET(req: NextRequest) {
           email: session.user.email,
           name: session.user.name,
         },
+        policy: policy
+          ? {
+              locked: policy.locked,
+              sessionResponseLimit: policy.sessionResponseLimit,
+              sessionResponseLimitsByTool: policy.sessionResponseLimitsByTool,
+              sessionResponsesUsed: policy.sessionResponsesUsed,
+              sessionResponsesRemaining: policy.sessionResponsesRemaining,
+              disabledTools: policy.disabledTools,
+              disabledModels: policy.disabledModels,
+              enabledModelsByTool: policy.enabledModelsByTool,
+            }
+          : null,
       },
       { headers: { 'Cache-Control': 'no-store' } }
     )

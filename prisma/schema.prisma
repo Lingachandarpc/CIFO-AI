@@ -22,6 +22,10 @@ model User {
   tokensUsed     Int      @default(0)       // Tokens used in current period
   tier           String   @default("free")  // free, pro, enterprise
   periodStart    DateTime @default(now())   // Current billing period start
+  serviceLocked  Boolean  @default(false)   // Super admin hard lock for all AI services
+  sessionResponseLimit Int?                 // Optional per-session response cap override
+  disabledTools  String[] @default([])      // Disabled tool ids for this user
+  disabledModels String[] @default([])      // Disabled model ids for this user
 
   // Relations
   accounts         Account[]
@@ -56,8 +60,20 @@ model Session {
   sessionToken String   @unique
   userId       Int
   expires      DateTime
+  aiResponsesUsed Int   @default(0)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GlobalUsagePolicy {
+  id                          Int      @id @default(autoincrement())
+  lockAllUsers                Boolean  @default(false)
+  defaultSessionResponseLimit Int?
+  disabledTools               String[] @default([])
+  disabledModels              String[] @default([])
+  enabledModelsByTool         Json?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 }
 
 model VerificationToken {

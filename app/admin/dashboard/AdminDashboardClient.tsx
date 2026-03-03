@@ -12,10 +12,23 @@ type DashboardUser = {
   tokensUsed: number;
   tokensRemaining: number;
   usagePercentage: number;
+  serviceLocked: boolean;
+  sessionResponseLimit: number | null;
+  disabledTools: string[];
+  disabledModels: string[];
   createdAt: string;
   chatCount: number;
   tokenRequestCount: number;
   lastActivityAt: string | null;
+};
+
+type GlobalPolicy = {
+  lockAllUsers: boolean;
+  defaultSessionResponseLimit: number | null;
+  disabledTools: string[];
+  disabledModels: string[];
+  enabledModelsByTool: Record<string, string[]>;
+  sessionResponseLimitsByTool: Record<string, number>;
 };
 
 type ActivityItem = {
@@ -35,11 +48,14 @@ type DashboardData = {
     totalTokensUsed: number;
     activeUsersLast7Days: number;
   };
+  globalPolicy: GlobalPolicy;
   users: DashboardUser[];
   recentActivity: ActivityItem[];
 };
 
 const TIERS = ["free", "pro", "enterprise"];
+const TOOL_OPTIONS = ["text", "listen", "image", "video", "ocr", "document", "dashboard"];
+const MODEL_GATED_TOOLS = ["text", "listen", "image", "video", "document"];
 
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
@@ -59,6 +75,23 @@ export default function AdminDashboardClient() {
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
   const [tokenInputs, setTokenInputs] = useState<Record<number, string>>({});
   const [tierInputs, setTierInputs] = useState<Record<number, string>>({});
+  const [lockInputs, setLockInputs] = useState<Record<number, boolean>>({});
+  const [sessionLimitInputs, setSessionLimitInputs] = useState<Record<number, string>>({});
+  const [disabledToolsInputs, setDisabledToolsInputs] = useState<Record<number, string>>({});
+  const [disabledModelsInputs, setDisabledModelsInputs] = useState<Record<number, string>>({});
+  const [globalPolicy, setGlobalPolicy] = useState<GlobalPolicy>({
+    lockAllUsers: false,
+    defaultSessionResponseLimit: null,
+    disabledTools: [],
+    disabledModels: [],
+    enabledModelsByTool: {},
+    sessionResponseLimitsByTool: {},
+  });
+  const [globalSessionLimitInput, setGlobalSessionLimitInput] = useState<string>("");
+  const [globalDisabledModelsInput, setGlobalDisabledModelsInput] = useState<string>("");
+  const [globalEnabledModelsByToolInputs, setGlobalEnabledModelsByToolInputs] = useState<Record<string, string>>({});
+  const [globalSessionLimitsByToolInputs, setGlobalSessionLimitsByToolInputs] = useState<Record<string, string>>({});
+  const [isSavingGlobalPolicy, setIsSavingGlobalPolicy] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
@@ -81,12 +114,73 @@ export default function AdminDashboardClient() {
 
       const data = (await response.json()) as DashboardData;
       setDashboardData(data);
+      if (data.globalPolicy) {
+        setGlobalPolicy(data.globalPolicy);
+        setGlobalSessionLimitInput(
+          typeof data.globalPolicy.defaultSessionResponseLimit === "number"
+            ? String(data.globalPolicy.defaultSessionResponseLimit)
+            : ""
+        );
+        setGlobalDisabledModelsInput((data.globalPolicy.disabledModels || []).join(", "));
+        const nextEnabledInputs: Record<string, string> = {};
+        for (const tool of MODEL_GATED_TOOLS) {
+          nextEnabledInputs[tool] = (data.globalPolicy.enabledModelsByTool?.[tool] || []).join(", ");
+        }
+        setGlobalEnabledModelsByToolInputs(nextEnabledInputs);
+
+        const nextSessionLimitInputs: Record<string, string> = {};
+        for (const tool of TOOL_OPTIONS) {
+          const rawLimit = data.globalPolicy.sessionResponseLimitsByTool?.[tool];
+          nextSessionLimitInputs[tool] = Number.isInteger(rawLimit) ? String(rawLimit) : "";
+        }
+        setGlobalSessionLimitsByToolInputs(nextSessionLimitInputs);
+      }
 
       setTierInputs((current) => {
         const next = { ...current };
         for (const user of data.users) {
           if (!next[user.id]) {
             next[user.id] = user.tier;
+          }
+        }
+        return next;
+      });
+
+      setLockInputs((current) => {
+        const next = { ...current };
+        for (const user of data.users) {
+          if (next[user.id] === undefined) {
+            next[user.id] = user.serviceLocked;
+          }
+        }
+        return next;
+      });
+
+      setSessionLimitInputs((current) => {
+        const next = { ...current };
+        for (const user of data.users) {
+          if (next[user.id] === undefined) {
+            next[user.id] = user.sessionResponseLimit === null ? "" : String(user.sessionResponseLimit);
+          }
+        }
+        return next;
+      });
+
+      setDisabledToolsInputs((current) => {
+        const next = { ...current };
+        for (const user of data.users) {
+          if (next[user.id] === undefined) {
+            next[user.id] = (user.disabledTools || []).join(", ");
+          }
+        }
+        return next;
+      });
+
+      setDisabledModelsInputs((current) => {
+        const next = { ...current };
+        for (const user of data.users) {
+          if (next[user.id] === undefined) {
+            next[user.id] = (user.disabledModels || []).join(", ");
           }
         }
         return next;
@@ -121,9 +215,30 @@ export default function AdminDashboardClient() {
   const handleApplyUpdate = async (user: DashboardUser) => {
     const additionalTokens = Number(tokenInputs[user.id] || "0");
     const selectedTier = tierInputs[user.id] || user.tier;
+    const serviceLocked = lockInputs[user.id] ?? user.serviceLocked;
+    const sessionLimitRaw = sessionLimitInputs[user.id] ?? (user.sessionResponseLimit === null ? "" : String(user.sessionResponseLimit));
+    const disabledToolsRaw = disabledToolsInputs[user.id] ?? (user.disabledTools || []).join(", ");
+    const disabledModelsRaw = disabledModelsInputs[user.id] ?? (user.disabledModels || []).join(", ");
+
+    const sessionResponseLimit = sessionLimitRaw.trim() === "" ? null : Number(sessionLimitRaw);
+    const disabledTools = disabledToolsRaw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+      .filter((value, index, list) => list.indexOf(value) === index);
+    const disabledModels = disabledModelsRaw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+      .filter((value, index, list) => list.indexOf(value) === index);
 
     if (Number.isNaN(additionalTokens) || additionalTokens < 0) {
       setErrorMessage("Additional tokens must be a positive number");
+      return;
+    }
+
+    if (sessionResponseLimit !== null && (!Number.isInteger(sessionResponseLimit) || sessionResponseLimit < 0)) {
+      setErrorMessage("Session response limit must be a non-negative integer or empty");
       return;
     }
 
@@ -139,6 +254,10 @@ export default function AdminDashboardClient() {
           userId: user.id,
           additionalTokens,
           tier: selectedTier,
+          serviceLocked,
+          sessionResponseLimit,
+          disabledTools,
+          disabledModels,
         }),
       });
 
@@ -160,6 +279,86 @@ export default function AdminDashboardClient() {
       setErrorMessage(message);
     } finally {
       setUpdatingUserId(null);
+    }
+  };
+
+  const handleGlobalPolicySave = async () => {
+    setIsSavingGlobalPolicy(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+
+    try {
+      const defaultSessionResponseLimit = globalSessionLimitInput.trim() === ""
+        ? null
+        : Number(globalSessionLimitInput);
+
+      if (
+        defaultSessionResponseLimit !== null &&
+        (!Number.isInteger(defaultSessionResponseLimit) || defaultSessionResponseLimit < 0)
+      ) {
+        setErrorMessage("Global session response limit must be a non-negative integer or empty");
+        return;
+      }
+
+      const disabledModels = globalDisabledModelsInput
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+        .filter((value, index, list) => list.indexOf(value) === index);
+
+      const enabledModelsByTool = Object.fromEntries(
+        MODEL_GATED_TOOLS.map((tool) => {
+          const raw = globalEnabledModelsByToolInputs[tool] || "";
+          const normalized = raw
+            .split(",")
+            .map((value) => value.trim().toLowerCase())
+            .filter(Boolean)
+            .filter((value, index, list) => list.indexOf(value) === index);
+          return [tool, normalized];
+        })
+      );
+
+      const sessionResponseLimitsByTool = Object.fromEntries(
+        TOOL_OPTIONS.map((tool) => {
+          const raw = String(globalSessionLimitsByToolInputs[tool] || "").trim();
+          if (!raw) return [tool, null];
+          const parsed = Number(raw);
+          if (!Number.isInteger(parsed) || parsed < 0) {
+            throw new Error(`Per-tool session limit for \"${tool}\" must be a non-negative integer or empty`);
+          }
+          return [tool, parsed];
+        }).filter(([, value]) => typeof value === "number")
+      ) as Record<string, number>;
+
+      const response = await fetch("/api/admin/dashboard/policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lockAllUsers: globalPolicy.lockAllUsers,
+          defaultSessionResponseLimit,
+          disabledTools: globalPolicy.disabledTools,
+          disabledModels,
+          enabledModelsByTool,
+          sessionResponseLimitsByTool,
+        }),
+      });
+
+      if (response.status === 401) {
+        router.push("/admin/dashboard/login");
+        return;
+      }
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to save global policy");
+      }
+
+      setStatusMessage("Global policy updated");
+      await loadDashboard();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save global policy");
+    } finally {
+      setIsSavingGlobalPolicy(false);
     }
   };
 
@@ -216,6 +415,136 @@ export default function AdminDashboardClient() {
           </div>
         )}
 
+        <div className="rounded-xl border border-(--border) bg-(--surface) p-4 space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">Global AI Access Policy</h2>
+            <p className="text-xs text-(--muted)">Apply restrictions to every user account.</p>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={globalPolicy.lockAllUsers}
+              onChange={(event) =>
+                setGlobalPolicy((current) => ({
+                  ...current,
+                  lockAllUsers: event.target.checked,
+                }))
+              }
+            />
+            Lock all users from every AI service
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs uppercase tracking-wide text-(--muted)">Default responses per session</label>
+              <input
+                type="number"
+                min={0}
+                value={globalSessionLimitInput}
+                onChange={(event) => setGlobalSessionLimitInput(event.target.value)}
+                placeholder="Unlimited"
+                className="mt-1 w-full rounded-lg border border-(--border) bg-background px-2 py-1"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs uppercase tracking-wide text-(--muted)">Disable tools globally</label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {TOOL_OPTIONS.map((tool) => {
+                  const active = globalPolicy.disabledTools.includes(tool);
+                  return (
+                    <button
+                      key={tool}
+                      type="button"
+                      onClick={() =>
+                        setGlobalPolicy((current) => ({
+                          ...current,
+                          disabledTools: active
+                            ? current.disabledTools.filter((value) => value !== tool)
+                            : [...current.disabledTools, tool],
+                        }))
+                      }
+                      className={`rounded-full border px-2 py-1 text-xs ${
+                        active ? "border-foreground bg-foreground text-background" : "border-(--border)"
+                      }`}
+                    >
+                      {tool}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs uppercase tracking-wide text-(--muted)">Disable models globally (comma-separated model ids)</label>
+            <input
+              type="text"
+              value={globalDisabledModelsInput}
+              onChange={(event) => setGlobalDisabledModelsInput(event.target.value)}
+              placeholder="gpt-4, gemini-flash"
+              className="mt-1 w-full rounded-lg border border-(--border) bg-background px-2 py-1"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs uppercase tracking-wide text-(--muted)">Enable models per tool (comma-separated model ids)</label>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              {MODEL_GATED_TOOLS.map((tool) => (
+                <div key={`enabled-models-${tool}`}>
+                  <label className="text-[10px] uppercase tracking-wide text-(--muted)">{tool}</label>
+                  <input
+                    type="text"
+                    value={globalEnabledModelsByToolInputs[tool] || ""}
+                    onChange={(event) =>
+                      setGlobalEnabledModelsByToolInputs((current) => ({
+                        ...current,
+                        [tool]: event.target.value,
+                      }))
+                    }
+                    placeholder={tool === "image" ? "gemini-2.5-flash-image, imagen-4.0-generate-001" : "auto or model ids"}
+                    className="mt-1 w-full rounded-lg border border-(--border) bg-background px-2 py-1 text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs uppercase tracking-wide text-(--muted)">Responses per session by tool (leave empty to use default)</label>
+            <div className="mt-2 grid gap-2 md:grid-cols-3">
+              {TOOL_OPTIONS.map((tool) => (
+                <div key={`session-limit-${tool}`}>
+                  <label className="text-[10px] uppercase tracking-wide text-(--muted)">{tool}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={globalSessionLimitsByToolInputs[tool] || ""}
+                    onChange={(event) =>
+                      setGlobalSessionLimitsByToolInputs((current) => ({
+                        ...current,
+                        [tool]: event.target.value,
+                      }))
+                    }
+                    placeholder="Use default"
+                    className="mt-1 w-full rounded-lg border border-(--border) bg-background px-2 py-1 text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleGlobalPolicySave()}
+            disabled={isSavingGlobalPolicy}
+            className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background disabled:opacity-50"
+          >
+            {isSavingGlobalPolicy ? "Saving..." : "Save Global Policy"}
+          </button>
+        </div>
+
         <div className="overflow-x-auto rounded-xl border border-(--border) bg-(--surface)">
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-(--border) text-xs uppercase tracking-wider text-(--muted)">
@@ -227,6 +556,10 @@ export default function AdminDashboardClient() {
                 <th className="px-3 py-3">Last Active</th>
                 <th className="px-3 py-3">Add Tokens</th>
                 <th className="px-3 py-3">Set Tier</th>
+                <th className="px-3 py-3">Lock</th>
+                <th className="px-3 py-3">Resp/Session</th>
+                <th className="px-3 py-3">Disable Tools</th>
+                <th className="px-3 py-3">Disable Models</th>
                 <th className="px-3 py-3">Action</th>
               </tr>
             </thead>
@@ -279,6 +612,64 @@ export default function AdminDashboardClient() {
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td className="px-3 py-3">
+                    <label className="inline-flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={lockInputs[user.id] ?? user.serviceLocked}
+                        onChange={(event) =>
+                          setLockInputs((current) => ({
+                            ...current,
+                            [user.id]: event.target.checked,
+                          }))
+                        }
+                      />
+                      Locked
+                    </label>
+                  </td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="number"
+                      min={0}
+                      value={sessionLimitInputs[user.id] ?? (user.sessionResponseLimit === null ? "" : String(user.sessionResponseLimit))}
+                      onChange={(event) =>
+                        setSessionLimitInputs((current) => ({
+                          ...current,
+                          [user.id]: event.target.value,
+                        }))
+                      }
+                      className="w-28 rounded-lg border border-(--border) bg-background px-2 py-1"
+                      placeholder="Unlimited"
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="text"
+                      value={disabledToolsInputs[user.id] ?? (user.disabledTools || []).join(", ")}
+                      onChange={(event) =>
+                        setDisabledToolsInputs((current) => ({
+                          ...current,
+                          [user.id]: event.target.value,
+                        }))
+                      }
+                      className="w-48 rounded-lg border border-(--border) bg-background px-2 py-1"
+                      placeholder="image, video"
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="text"
+                      value={disabledModelsInputs[user.id] ?? (user.disabledModels || []).join(", ")}
+                      onChange={(event) =>
+                        setDisabledModelsInputs((current) => ({
+                          ...current,
+                          [user.id]: event.target.value,
+                        }))
+                      }
+                      className="w-56 rounded-lg border border-(--border) bg-background px-2 py-1"
+                      placeholder="gpt-4, gemini-flash"
+                    />
                   </td>
                   <td className="px-3 py-3">
                     <button

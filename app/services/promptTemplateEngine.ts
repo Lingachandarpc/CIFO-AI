@@ -201,7 +201,7 @@ ${intentGuide}
 - Use **bold** for key terms and headings.
 ${context.language ? `- Respond entirely in ${context.language}.` : ''}
 ${context.narrationType === 'Educational' ? '- Use educational formatting only when it improves clarity; do not force tables/charts/tabs/sliders in every answer.' : ''}
-${context.narrationType === 'Dramatic' ? '- Add engaging narrative elements and emotional depth.' : ''}
+${context.narrationType === 'Practical' ? '- Use a practical problem-solving style: identify real-world use cases, include evidence-backed patterns from books/research/journals when available, and present actionable options with trade-offs.' : ''}
 ${context.narrationType === 'Personalized' ? '- Personalize explanations using user profile context (interests, pulse, bio, age, location) when relevant.' : ''}`;
 
   const user = `${classification.normalizedQuery}${buildUserProfileContext(context.userProfile)}${buildWebContext(context.webResults)}${buildAttachmentContext(classification)}`;
@@ -239,7 +239,7 @@ ${intentGuide}
 
 ${context.language ? `**Language**: Respond entirely in ${context.language}.` : ''}
 ${context.narrationType === 'Educational' ? '\n**Style**: Use educational formatting selectively—add tables/diagrams/tabs/progress only when they materially improve understanding.' : ''}
-${context.narrationType === 'Dramatic' ? '\n**Style**: Weave narrative tension, emotional depth, and storytelling into the analysis.' : ''}
+${context.narrationType === 'Practical' ? '\n**Style**: Focus on practical execution. Ask concise diagnostic questions when key inputs are missing, evaluate options with trade-offs, and summarize a realistic action plan grounded in examples, books, research papers, and journals when available.' : ''}
 ${context.narrationType === 'Personalized' ? '\n**Style**: Tailor the response to user profile context (interests, pulse, bio, age, location) where helpful.' : ''}
 
 **Quality Standards:**

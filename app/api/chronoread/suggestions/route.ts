@@ -2,6 +2,9 @@ export const runtime = "nodejs";
 
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../../services/authOptions";
+import { enforceUsagePolicy } from "../../../../lib/usagePolicy";
 
 export async function POST(req: Request) {
   const key = process.env.OPENAI_API_KEY;
@@ -12,6 +15,20 @@ export async function POST(req: Request) {
   const openai = new OpenAI({ apiKey: key });
 
   try {
+    const session = await getServerSession(authOptions);
+    const authEmail = session?.user?.email || null;
+    if (authEmail) {
+      const policyCheck = await enforceUsagePolicy({
+        request: req,
+        userEmail: authEmail,
+        toolType: "read",
+        modelId: process.env.OPENAI_SUGGESTIONS_MODEL || "gpt-3.5-turbo",
+      });
+      if (!policyCheck.allowed) {
+        return policyCheck.response;
+      }
+    }
+
     const { query, language, chatHistory, tool, headers } = await req.json();
 
     const isDashboardMode = String(tool || '').toLowerCase() === 'dashboard';
