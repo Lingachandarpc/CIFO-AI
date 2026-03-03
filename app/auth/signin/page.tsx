@@ -55,10 +55,10 @@ function SignInContent() {
         {/* Header */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
-            <span className="text-2xl font-bold text-[var(--background)]">S</span>
+            <span className="text-2xl font-bold text-[var(--background)]">C</span>
           </div>
-          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">Self \ Fles</h1>
-          <p className="text-[var(--muted)]">Self companion AI app.</p>
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">ChronicleX <span className="brand-ai-glow">AI</span></h1>
+          <p className="text-[var(--muted)]">ChronicleX AI companion app.</p>
         </div>
 
         {/* Error Message */}

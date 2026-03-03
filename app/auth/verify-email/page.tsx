@@ -80,7 +80,7 @@ function VerifyEmailContent() {
             <div>
               <h3 className="text-[var(--foreground)] font-semibold mb-1">Check your inbox</h3>
               <p className="text-[var(--muted)] text-sm">
-                Look for an email from Self \ Fles with a sign in link
+                Look for an email from ChronicleX AI with a sign in link
               </p>
             </div>
           </div>

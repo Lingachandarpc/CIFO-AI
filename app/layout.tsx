@@ -20,8 +20,20 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Self \\ Fles",
-  description: "Self companion AI app.",
+  title: "ChronicleX AI",
+  description: "ChronicleX AI companion app.",
+  applicationName: "ChronicleX AI",
+  openGraph: {
+    title: "ChronicleX AI",
+    description: "ChronicleX AI companion app.",
+    siteName: "ChronicleX AI",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ChronicleX AI",
+    description: "ChronicleX AI companion app.",
+  },
   icons: {
     icon: "/eyes-logo.svg",
     shortcut: "/eyes-logo.svg",

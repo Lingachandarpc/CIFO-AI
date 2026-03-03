@@ -1,12 +1,11 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { SearchMode, Settings, ChatMessage, HistoryItem, HistoryConversationEntry, Language, TextToSpeechProvider, Genre, VoiceGender, AIModel, VoiceProfile, DEFAULT_GOOGLE_VOICE } from './types';
-import { SettingsIcon, HistoryIcon, PlayIcon, MicIcon, StopIcon, VolumeIcon } from '../components/Icons';
+import { SettingsIcon, HistoryIcon, MicIcon, StopIcon } from '../components/Icons';
 import ThemeToggle from '../components/ThemeToggle';
 import SearchBar, { type AttachedFile } from '../components/SearchBar';
 import { generateNarrative, generateSpeechDetailed, decodeAudio, getAudioBuffer, generateSuggestions, generateDashboardSuggestions, generateToolImage, generateToolVideo, pollToolVideoStatus, generateToolDocument, generateToolDashboard, generateToolOCR, type TtsAudioPayload } from './services/openaiService';
@@ -173,8 +172,6 @@ export default function HomeView() {
   const [isMicMuted, setIsMicMuted] = useState(true);
   const [readSuggestions, setReadSuggestions] = useState<string[]>([]);
   const [dashboardLlmSuggestions, setDashboardLlmSuggestions] = useState<string[]>([]);
-  const [activeNarrationKey, setActiveNarrationKey] = useState<string | null>(null);
-  const [isHistoryNarrationLoading, setIsHistoryNarrationLoading] = useState(false);
   const { status } = useSession();
   const [authCheckAuthenticated, setAuthCheckAuthenticated] = useState(false);
   const isSessionAuthenticated = status === 'authenticated';
@@ -293,7 +290,6 @@ export default function HomeView() {
   const isMicMutedRef = useRef(false);
   const listenRequestPendingRef = useRef(false);
   const ttsSessionRef = useRef<string | null>(null);
-  const activeNarrationKeyRef = useRef<string | null>(null);
   const lastNarrationRef = useRef<string>('');
   const lastListenQueryRef = useRef<string>('');
   const activeListenSessionIdRef = useRef<string | null>(null);
@@ -1560,77 +1556,6 @@ export default function HomeView() {
     });
   };
 
-  const handlePlayAudio = async (base64: string, options?: { listenMode?: boolean; genre?: string | null }) => {
-    initAudio();
-
-    try { window.speechSynthesis.cancel(); } catch {}
-
-    // Stop any previously playing source
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {};
-      try { currentSourceRef.current.disconnect(); } catch {}
-      currentSourceRef.current = null;
-    }
-
-    const onStarted = () => {
-      isNarratingRef.current = true;
-      setIsNarrating(true);
-      if (options?.listenMode) {
-        setListenStatus("narrating");
-        startAmbientMusic(options.genre || null);
-      }
-    };
-
-    const onEnded = () => {
-      isNarratingRef.current = false;
-      setIsNarrating(false);
-      narrationAnalyserRef.current = null;
-      stopAmbientMusic();
-      if (interactionModeRef.current === "listen") {
-        setListenStatus(isMicMutedRef.current ? "idle" : "listening");
-      }
-    };
-
-    // Try Web Audio API first (supports analyser for waveform visualisation)
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state === 'suspended') {
-        try { await audioContextRef.current.resume(); } catch {}
-      }
-
-      try {
-        const data = decodeAudio(base64);
-        const buffer = await getAudioBuffer(data, audioContextRef.current);
-        const source = audioContextRef.current.createBufferSource();
-        const analyser = audioContextRef.current.createAnalyser();
-        analyser.fftSize = 512;
-        source.buffer = buffer;
-        source.connect(analyser);
-        analyser.connect(audioContextRef.current.destination);
-        source.start(0);
-        currentSourceRef.current = source;
-        narrationAnalyserRef.current = analyser;
-        onStarted();
-        source.onended = onEnded;
-        return; // success
-      } catch (webAudioError) {
-        console.warn('Web Audio API playback failed, falling back to HTML5 Audio:', webAudioError);
-      }
-    }
-
-    // Fallback: HTML5 Audio element
-    try {
-      const mimeType = detectAudioMimeType(base64);
-      const audio = new Audio(`data:${mimeType};base64,${base64}`);
-      onStarted();
-      audio.onended = onEnded;
-      audio.onerror = () => { onEnded(); };
-      await audio.play();
-    } catch (err) {
-      console.error('HTML5 Audio fallback also failed:', err);
-      onEnded();
-    }
-  };
-
   const splitTextForTts = (value: string, maxChunkLength = 600) => {
     const sentences = value.match(/[^.!?\n]+[.!?]?/g) || [value];
     const chunks: string[] = [];
@@ -2030,8 +1955,6 @@ export default function HomeView() {
 
   const stopNarration = () => {
     ttsSessionRef.current = null;
-    activeNarrationKeyRef.current = null;
-    setActiveNarrationKey(null);
     if (currentSourceRef.current) {
       try { currentSourceRef.current.stop(); } catch {};
       try { currentSourceRef.current.disconnect(); } catch {}
@@ -2149,30 +2072,26 @@ export default function HomeView() {
     }
   };
 
-  const triggerBase64FileDownload = (base64Data: string, fileName: string, mimeType: string): { viewUrl?: string; downloaded: boolean } => {
+  const isLikelyMobileDevice = () => (
+    /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent)
+    || window.matchMedia('(max-width: 768px)').matches
+  );
+
+  const triggerBase64FileDownload = (
+    base64Data: string,
+    fileName: string,
+    mimeType: string,
+  ): { viewUrl?: string; downloaded: boolean; mobileFallback: boolean } => {
     try {
       const binary = atob(base64Data);
       const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
       const blob = new Blob([bytes], { type: mimeType });
       const objectUrl = URL.createObjectURL(blob);
 
-      const isMobile = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent)
-        || window.matchMedia('(max-width: 768px)').matches;
+      const isMobile = isLikelyMobileDevice();
 
       if (isMobile) {
-        const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer');
-        if (opened) {
-          return { viewUrl: objectUrl, downloaded: false };
-        }
-
-        const mobileAnchor = document.createElement('a');
-        mobileAnchor.href = objectUrl;
-        mobileAnchor.target = '_blank';
-        mobileAnchor.rel = 'noopener noreferrer';
-        document.body.appendChild(mobileAnchor);
-        mobileAnchor.click();
-        document.body.removeChild(mobileAnchor);
-        return { viewUrl: objectUrl, downloaded: false };
+        return { viewUrl: objectUrl, downloaded: false, mobileFallback: true };
       }
 
       const anchor = document.createElement('a');
@@ -2181,7 +2100,7 @@ export default function HomeView() {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      return { viewUrl: objectUrl, downloaded: true };
+      return { viewUrl: objectUrl, downloaded: true, mobileFallback: false };
     } catch {
       const anchor = document.createElement('a');
       anchor.href = `data:${mimeType};base64,${base64Data}`;
@@ -2189,7 +2108,7 @@ export default function HomeView() {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      return { viewUrl: anchor.href, downloaded: true };
+      return { viewUrl: anchor.href, downloaded: true, mobileFallback: false };
     }
   };
 
@@ -2420,16 +2339,6 @@ export default function HomeView() {
       normalized.includes('all ai models failed to generate a response') ||
       normalized.includes('api key not configured') ||
       normalized.includes('service is unavailable right now')
-    );
-  };
-
-  const isOcrAssistantMessage = (msg: ChatMessage) => {
-    const normalized = msg.content.toLowerCase();
-    return (
-      normalized.includes('ocr completed') ||
-      normalized.startsWith('ocr failed') ||
-      normalized.includes('error while extracting text') ||
-      normalized.includes('ocr extraction')
     );
   };
 
@@ -2726,6 +2635,54 @@ export default function HomeView() {
       }, 1800);
     } catch (error) {
       console.error('Failed to copy response:', error);
+    }
+  };
+
+  const handleOpenDocument = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareDocument = async (url: string, fileName?: string, mimeType?: string) => {
+    if (!navigator.share) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const sharedFileName = fileName || 'generated-document';
+      const file = new File([blob], sharedFileName, { type: mimeType || blob.type || 'application/octet-stream' });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: sharedFileName });
+        return;
+      }
+
+      await navigator.share({
+        title: sharedFileName,
+        text: 'Generated document',
+        url,
+      });
+    } catch (error) {
+      console.error('Document share failed:', error);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleCopyDocumentLink = async (messageId: string, url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      const copyId = `${messageId}-doc-link`;
+      setCopiedMessageId(copyId);
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+      copyFeedbackTimeoutRef.current = setTimeout(() => {
+        setCopiedMessageId((current) => (current === copyId ? null : current));
+      }, 1800);
+    } catch (error) {
+      console.error('Failed to copy document link:', error);
     }
   };
 
@@ -3569,6 +3526,9 @@ ${wantsEditableCanvas
               summary: docResult.summary,
             };
             assistantContent = `✅ Document generated (${docResult.format?.toUpperCase() || requestedFormat.toUpperCase()}).`;
+            if (downloadResult.mobileFallback) {
+              assistantContent += '\n\nOn mobile, use Open, Share, or Copy Link to access the file.';
+            }
           }
           if (docResult.summary) {
             assistantContent += `\n\n${docResult.summary}`;
@@ -4489,166 +4449,6 @@ Rules:
     void submitQuery(suggestion, attachments);
   };
 
-  const handleNarrateHistoryEntry = async (
-    entry: { role: string; content: string },
-    entryKey: string,
-    voiceProfile?: VoiceProfile
-  ) => {
-    if (entry.role !== 'assistant') return;
-    if (isNarrating && activeNarrationKeyRef.current === entryKey) {
-      handleStopNarration();
-      return;
-    }
-    handleStopNarration();
-    activeNarrationKeyRef.current = entryKey;
-    setActiveNarrationKey(entryKey);
-    setIsHistoryNarrationLoading(true);
-    setListenStatus('thinking');
-    const excerpt = getTtsExcerpt(entry.content, "listen");
-    if (settings.ttsProvider === TextToSpeechProvider.OPEN_SOURCE) {
-      try {
-        playBrowserTTS(excerpt, {
-          onComplete: () => {
-            if (activeNarrationKeyRef.current === entryKey) {
-              activeNarrationKeyRef.current = null;
-              setActiveNarrationKey(null);
-            }
-            setIsHistoryNarrationLoading(false);
-            setListenStatus('idle');
-          },
-          voiceProfile,
-        });
-      } catch (fallbackError) {
-        console.error('Browser TTS failed:', fallbackError);
-        setIsHistoryNarrationLoading(false);
-        setListenStatus('idle');
-      }
-      setIsHistoryNarrationLoading(false);
-      setListenStatus('narrating');
-      return;
-    }
-
-    const playStatus = await playTtsInChunks(excerpt, voiceProfile, {
-      listenMode: false,
-      onStart: () => {
-        setIsHistoryNarrationLoading(false);
-        setListenStatus('narrating');
-      },
-      onFinish: () => {
-        setIsHistoryNarrationLoading(false);
-        setListenStatus('idle');
-      },
-    });
-    if (playStatus === 'timeout') {
-      if (activeNarrationKeyRef.current === entryKey) {
-        activeNarrationKeyRef.current = null;
-        setActiveNarrationKey(null);
-      }
-      setIsHistoryNarrationLoading(false);
-      setListenStatus('idle');
-      return;
-    }
-    if (playStatus === 'failed') {
-      try {
-        playBrowserTTS(excerpt, {
-          onComplete: () => {
-            if (activeNarrationKeyRef.current === entryKey) {
-              activeNarrationKeyRef.current = null;
-              setActiveNarrationKey(null);
-            }
-            setIsHistoryNarrationLoading(false);
-            setListenStatus('idle');
-          },
-          voiceProfile,
-        });
-      } catch (fallbackError) {
-        console.error('Browser TTS fallback failed:', fallbackError);
-        setIsHistoryNarrationLoading(false);
-        setListenStatus('idle');
-      }
-      return;
-    }
-
-    if (activeNarrationKeyRef.current === entryKey) {
-      activeNarrationKeyRef.current = null;
-      setActiveNarrationKey(null);
-    }
-    setIsHistoryNarrationLoading(false);
-    setListenStatus('idle');
-  };
-
-  const handleNarrateReadMessage = async (msg: ChatMessage) => {
-    if (msg.role !== 'assistant') return;
-    if (isNarrating && activeNarrationKeyRef.current === msg.id) {
-      handleStopNarration();
-      return;
-    }
-
-    handleStopNarration();
-    activeNarrationKeyRef.current = msg.id;
-    setActiveNarrationKey(msg.id);
-    setListenStatus('thinking');
-
-    const excerpt = getTtsExcerpt(msg.content, 'read');
-
-    if (settings.ttsProvider === TextToSpeechProvider.OPEN_SOURCE) {
-      try {
-        playBrowserTTS(excerpt, {
-          onComplete: () => {
-            if (activeNarrationKeyRef.current === msg.id) {
-              activeNarrationKeyRef.current = null;
-              setActiveNarrationKey(null);
-            }
-            setListenStatus('idle');
-          },
-        });
-      } catch (fallbackError) {
-        console.error('Browser TTS failed:', fallbackError);
-        setListenStatus('idle');
-      }
-      return;
-    }
-
-    const playStatus = await playTtsInChunks(excerpt, undefined, {
-      listenMode: false,
-      onStart: () => setListenStatus('narrating'),
-      onFinish: () => setListenStatus('idle'),
-    });
-
-    if (playStatus === 'timeout') {
-      if (activeNarrationKeyRef.current === msg.id) {
-        activeNarrationKeyRef.current = null;
-        setActiveNarrationKey(null);
-      }
-      setListenStatus('idle');
-      return;
-    }
-
-    if (playStatus === 'failed') {
-      try {
-        playBrowserTTS(excerpt, {
-          onComplete: () => {
-            if (activeNarrationKeyRef.current === msg.id) {
-              activeNarrationKeyRef.current = null;
-              setActiveNarrationKey(null);
-            }
-            setListenStatus('idle');
-          },
-        });
-      } catch (fallbackError) {
-        console.error('Browser TTS fallback failed:', fallbackError);
-        setListenStatus('idle');
-      }
-      return;
-    }
-
-    if (activeNarrationKeyRef.current === msg.id) {
-      activeNarrationKeyRef.current = null;
-      setActiveNarrationKey(null);
-    }
-    setListenStatus('idle');
-  };
-
   const closeListenModal = () => {
     handleStopNarration();
     resetListenSession();
@@ -4712,8 +4512,6 @@ Rules:
     return fallback;
   };
 
-  const isListenBusy = listenStatus === "thinking" || isNarrating;
-
   if (status === 'loading') {
     return (
       <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
@@ -4728,10 +4526,12 @@ Rules:
       <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4">
         <div className="w-full max-w-md text-center">
           <div className="w-16 h-16 bg-[var(--foreground)] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[var(--shadow)]">
-            <span className="text-2xl font-bold text-[var(--background)]">S</span>
+            <span className="text-2xl font-bold text-[var(--background)]">C</span>
           </div>
-          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-4">Welcome to Self \ Fles</h1>
-          <p className="text-[var(--muted)] mb-8 text-lg">Self companion AI app.</p>
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-4">
+            Welcome to ChronicleX <span className="brand-ai-glow">AI</span>
+          </h1>
+          <p className="text-[var(--muted)] mb-8 text-lg">ChronicleX AI companion app.</p>
           <div className="space-y-3">
             <button
               onClick={() => router.push('/auth/signin')}
@@ -4760,10 +4560,10 @@ Rules:
           onClick={stopNarrationForUiChange}
           className="p-6 border-b border-[var(--border)] flex items-center gap-3 hover:bg-[var(--surface-strong)] transition-colors"
         >
-          <div className="shrink-0 flex items-center justify-center">
-            <Image src="/eyes-logo.svg" alt="Self Fles eyes logo" width={34} height={20} priority />
-          </div>
-          <span className="font-bold tracking-tight text-lg">Self \ Fles</span>
+          {/* <div className="shrink-0 flex items-center justify-center">
+            <Image src="/eyes-logo.svg" alt="ChronicleX AI eyes logo" width={34} height={20} priority />
+          </div> */}
+          <span className="font-bold tracking-tight text-lg">ChronicleX <span className="brand-ai-glow">AI</span></span>
         </Link>
         
         <div className="flex-1 overflow-y-auto p-4 flex flex-col">
@@ -4893,7 +4693,7 @@ Rules:
       <main className="flex-1 min-w-0 flex flex-col relative bg-[var(--background)] overflow-x-hidden">
         {/* Header (Mobile) */}
         <header className="md:hidden p-4 border-b border-[var(--border)] flex justify-between items-center">
-          <span className="font-bold">Self \ Fles</span>
+          <span className="font-bold">ChronicleX <span className="brand-ai-glow">AI</span></span>
           <button
             type="button"
             onClick={() => setIsMobileMenuOpen(true)}
@@ -5076,12 +4876,6 @@ Rules:
                   isDashboardSessionSuggestionMessage(msg) ||
                   (selectedTool === 'dashboard' && isLatestMessage)
                 );
-                const showNarrationButton = !(
-                  msg.media?.type === 'image' ||
-                  !!msg.document ||
-                  isDashboardAssistantMessage ||
-                  isOcrAssistantMessage(msg)
-                );
                 const showCopyButton = !isDashboardAssistantMessage;
                 return (
                   <div
@@ -5159,7 +4953,7 @@ Rules:
                               <button
                                 type="button"
                                 onClick={() => {
-                                  window.open(msg.document?.url, '_blank', 'noopener,noreferrer');
+                                  handleOpenDocument(msg.document?.url || '');
                                 }}
                                 className="mb-3 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left"
                               >
@@ -5184,6 +4978,42 @@ Rules:
                                     {msg.document.summary}
                                   </p>
                                 )}
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleOpenDocument(msg.document?.url || '');
+                                    }}
+                                    className="px-2 py-1 rounded border border-[var(--border)] text-[10px] uppercase tracking-widest hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                                  >
+                                    Open
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleShareDocument(
+                                        msg.document?.url || '',
+                                        msg.document?.fileName,
+                                        msg.document?.mimeType,
+                                      );
+                                    }}
+                                    className="px-2 py-1 rounded border border-[var(--border)] text-[10px] uppercase tracking-widest hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                                  >
+                                    Share
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleCopyDocumentLink(msg.id, msg.document?.url || '');
+                                    }}
+                                    className="px-2 py-1 rounded border border-[var(--border)] text-[10px] tracking-widest hover:text-[var(--foreground)] hover:border-[var(--muted-strong)] transition-colors"
+                                  >
+                                    {copiedMessageId === `${msg.id}-doc-link` ? 'Copied' : 'Copy Link'}
+                                  </button>
+                                </div>
                               </button>
                             )}
                             {sanitizeNarrationForDisplay(displayContent).trim() && (
@@ -5201,21 +5031,6 @@ Rules:
                     {msg.role === 'assistant' && (
                       <>
                         <div className="text-[10px] text-[var(--muted)] px-2 flex items-center gap-3 uppercase tracking-tighter mt-2">
-                          {showNarrationButton && (
-                            <button
-                              onClick={() => {
-                                if (msg.audioBlob) {
-                                  handlePlayAudio(msg.audioBlob);
-                                } else {
-                                  void handleNarrateReadMessage(msg);
-                                }
-                              }}
-                              className="p-0.5 hover:text-[var(--foreground)] transition-colors"
-                              title="Listen to narration"
-                            >
-                              <VolumeIcon className="w-3.5 h-3.5" />
-                            </button>
-                          )}
                           {showCopyButton && (
                             <button
                               onClick={() => {
@@ -5227,7 +5042,7 @@ Rules:
                               {copiedMessageId === msg.id ? 'Copied' : 'Copy'}
                             </button>
                           )}
-                          <span>Self \\ Fles</span>
+                          <span>ChronicleX <span className="brand-ai-glow">AI</span></span>
                           {msg.tokenUsage && (
                             <>
                               <span>•</span>
@@ -5582,21 +5397,6 @@ Rules:
                 <p className="text-xs text-[var(--muted)] uppercase tracking-widest mt-1 line-clamp-1">{selectedHistory.query}</p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={handleStopNarration}
-                  disabled={!isListenBusy && !isHistoryNarrationLoading}
-                  className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--surface-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {listenStatus === "thinking" || isHistoryNarrationLoading ? (
-                    <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
-                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--muted)] border-t-transparent" />
-                    </span>
-                  ) : (
-                    <StopIcon className="w-3.5 h-3.5" />
-                  )}
-                  {listenStatus === "thinking" || isHistoryNarrationLoading ? "Loading" : "Stop"}
-                </button>
                 <button onClick={closeListenModal} className="text-[var(--muted)] hover:text-[var(--foreground)]">
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -5608,8 +5408,6 @@ Rules:
             <div className="p-4 sm:p-6 space-y-3 sm:space-y-4 max-h-[calc(95vh-200px)] overflow-y-auto overflow-x-hidden">
               <div className="space-y-3">
                 {getListenConversation(selectedHistory).map((entry, index) => {
-                  const entryKey = `${selectedHistory.id}-${index}`;
-                  const isEntryNarrating = isNarrating && activeNarrationKey === entryKey;
                   return (
                   <div key={`${entry.role}-${index}`} className={`p-3 rounded-xl border text-sm ${entry.role === 'user' ? 'border-[var(--border)] bg-[var(--surface-strong)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
                     <p className="text-[11px] uppercase tracking-widest text-[var(--muted)] mb-2">{entry.role === 'user' ? 'You' : 'Narrator'}</p>
@@ -5629,15 +5427,6 @@ Rules:
                         </>
                       ) : (
                         <span className="whitespace-pre-line text-xs sm:text-sm">{entry.content}</span>
-                      )}
-                      {entry.role === 'assistant' && (
-                        <button
-                          onClick={() => handleNarrateHistoryEntry(entry, entryKey, selectedHistory.voiceProfile)}
-                          className={`mt-2 inline-flex items-center gap-2 px-2.5 py-1 text-xs rounded-md transition-opacity ${isEntryNarrating ? 'bg-[var(--surface-strong)] text-[var(--foreground)]' : 'bg-[var(--foreground)] text-[var(--background)] hover:opacity-90'}`}
-                        >
-                          {isEntryNarrating ? <StopIcon className="w-3.5 h-3.5" /> : <PlayIcon className="w-3.5 h-3.5" />}
-                          {isEntryNarrating ? 'Stop' : 'Play'}
-                        </button>
                       )}
                     </div>
                   </div>

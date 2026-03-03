@@ -278,9 +278,9 @@ export default function Home() {
       <aside className="w-64 border-r border-neutral-800 hidden md:flex md:flex-col">
         <div className="p-6 border-b border-neutral-800 flex items-center gap-3">
           <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center">
-            <span className="text-black font-bold text-xl">S</span>
+            <span className="text-black font-bold text-xl">C</span>
           </div>
-          <span className="font-bold tracking-tight text-lg">Self \ Fles</span>
+          <span className="font-bold tracking-tight text-lg">ChronicleX <span className="brand-ai-glow">AI</span></span>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
@@ -330,7 +330,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col relative bg-black">
         {/* Header (Mobile) */}
         <header className="md:hidden p-4 border-b border-neutral-800 flex justify-between items-center">
-          <span className="font-bold">Self \ Fles</span>
+          <span className="font-bold">ChronicleX <span className="brand-ai-glow">AI</span></span>
           <button onClick={() => setIsSettingsOpen(true)}><SettingsIcon /></button>
         </header>
 
@@ -340,7 +340,7 @@ export default function Home() {
             {messages.length === 0 && (
               <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
                 <div className="w-16 h-16 bg-neutral-900 rounded-2xl flex items-center justify-center border border-neutral-800">
-                  <span className="text-3xl font-bold">S</span>
+                  <span className="text-3xl font-bold">C</span>
                 </div>
                 <div>
                   <h1 className="text-3xl font-bold mb-2">Narrate in {settings.language}</h1>

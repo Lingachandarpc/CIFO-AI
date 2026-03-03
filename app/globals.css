@@ -24,6 +24,9 @@
   --listen-accent-12: #fb7185;
   --listen-orb-glow: rgba(59, 130, 246, 0.25);
   --listen-core-glow: rgba(56, 189, 248, 0.5);
+  --brand-ai-glow-1: #7dd3fc;
+  --brand-ai-glow-2: #a78bfa;
+  --brand-ai-glow-3: #34d399;
 }
 
 html[data-theme="light"] {
@@ -50,6 +53,9 @@ html[data-theme="light"] {
   --listen-accent-12: #e11d48;
   --listen-orb-glow: rgba(37, 99, 235, 0.22);
   --listen-core-glow: rgba(14, 165, 233, 0.35);
+  --brand-ai-glow-1: #0284c7;
+  --brand-ai-glow-2: #7c3aed;
+  --brand-ai-glow-3: #059669;
 }
 
 @theme inline {
@@ -122,6 +128,27 @@ body {
 
 .grok-glow {
   animation: glow 3s ease-in-out infinite;
+}
+
+@keyframes brand-ai-ambient {
+  0%, 100% {
+    text-shadow: 0 0 10px color-mix(in srgb, var(--brand-ai-glow-2) 35%, transparent);
+    filter: brightness(1);
+  }
+  50% {
+    text-shadow:
+      0 0 14px color-mix(in srgb, var(--brand-ai-glow-1) 42%, transparent),
+      0 0 20px color-mix(in srgb, var(--brand-ai-glow-3) 28%, transparent);
+    filter: brightness(1.06);
+  }
+}
+
+.brand-ai-glow {
+  background-image: linear-gradient(120deg, var(--brand-ai-glow-1), var(--brand-ai-glow-2), var(--brand-ai-glow-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: brand-ai-ambient 4.5s ease-in-out infinite;
 }
 
 .listen-stage {
