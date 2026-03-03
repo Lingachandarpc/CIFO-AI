@@ -239,7 +239,8 @@ export async function generateToolImage(
     size?: string;
     quality?: string;
     style?: string;
-  }
+  },
+  attachments?: Array<{ type: string; data: string; name: string }>
 ): Promise<{ imageUrl?: string; modelUsed?: string; error?: string }> {
   try {
     const res = await fetch(`${API_BASE}/ai-tools`, {
@@ -248,6 +249,7 @@ export async function generateToolImage(
       body: JSON.stringify({
         type: 'image',
         prompt,
+        attachments: (attachments || []).filter((item) => item?.data && item?.type?.startsWith('image/')),
         options: {
           model,
           n: 1,

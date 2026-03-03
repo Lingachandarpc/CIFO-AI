@@ -56,10 +56,60 @@ export async function generateImage(prompt: string, options?: {
   n?: number; // number of variations
   model?: string;
   sourceImageUrl?: string;
+  sourceAttachments?: Array<{ data: string; mimeType?: string; name?: string }>;
 }): Promise<AIToolResponse> {
   const startTime = Date.now();
 
   try {
+    const parseDataUrlImage = (value?: string) => {
+      const raw = String(value || '').trim();
+      if (!raw.startsWith('data:image/')) return null;
+      const match = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if (!match || !match[2]) return null;
+      return {
+        mimeType: match[1],
+        data: match[2],
+        name: 'source-image',
+      };
+    };
+
+    const sourceImages = [
+      ...(Array.isArray(options?.sourceAttachments) ? options.sourceAttachments : []),
+      ...(parseDataUrlImage(options?.sourceImageUrl) ? [parseDataUrlImage(options?.sourceImageUrl)!] : []),
+    ]
+      .map((item, index) => ({
+        mimeType: String(item?.mimeType || '').trim().toLowerCase().startsWith('image/')
+          ? String(item?.mimeType || '').trim().toLowerCase()
+          : 'image/png',
+        data: String(item?.data || '').trim(),
+        name: String(item?.name || `reference-${index + 1}`).trim(),
+      }))
+      .filter((item) => Boolean(item.data))
+      .slice(0, 3);
+
+    const buildAttachmentAwareImagePrompt = (rawPrompt: string) => {
+      const baseInstruction = String(rawPrompt || '').trim();
+      if (!sourceImages.length) return baseInstruction;
+
+      const referencesText = sourceImages
+        .map((image, index) => `${index + 1}. ${image.name} (${image.mimeType})`)
+        .join('\n');
+
+      return [
+        'Generate one high-quality image using the attached reference image(s).',
+        'Treat uploaded images as visual source material, not as unrelated inspiration.',
+        'Preserve key composition, subject identity, and scene structure unless the user explicitly asks to change them.',
+        'Apply only the requested transformations from the user instruction.',
+        '',
+        'Reference images:',
+        referencesText,
+        '',
+        `User instruction: ${baseInstruction}`,
+      ].join('\n');
+    };
+
+    const effectivePrompt = buildAttachmentAwareImagePrompt(prompt);
+
     const requested = options?.model?.toLowerCase() || 'auto';
     const route = (() => {
       if (requested === 'auto') {
@@ -100,7 +150,7 @@ export async function generateImage(prompt: string, options?: {
           },
           body: JSON.stringify({
             model: xaiModel,
-            prompt,
+            prompt: effectivePrompt,
             n: options?.n || 1,
             size: options?.size || '1024x1024',
           }),
@@ -156,7 +206,17 @@ export async function generateImage(prompt: string, options?: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `Generate one high-quality image: ${prompt}` }] }],
+        contents: [{
+          parts: [
+            { text: effectivePrompt },
+            ...sourceImages.map((image) => ({
+              inlineData: {
+                mimeType: image.mimeType,
+                data: image.data,
+              },
+            })),
+          ],
+        }],
         generationConfig: {
           responseModalities: ['TEXT', 'IMAGE'],
         },
@@ -3545,7 +3605,16 @@ export async function processAIToolRequest(request: AIToolRequest): Promise<AITo
           processingTime: 0,
         };
       }
-      return generateImage(request.prompt, request.options);
+      return generateImage(request.prompt, {
+        ...(request.options || {}),
+        sourceAttachments: (request.attachments || [])
+          .filter((attachment) => String(attachment.type || '').toLowerCase().startsWith('image/') && Boolean(attachment.data))
+          .map((attachment) => ({
+            data: attachment.data,
+            mimeType: attachment.type,
+            name: attachment.name,
+          })),
+      });
 
     case 'video':
       if (!request.prompt) {

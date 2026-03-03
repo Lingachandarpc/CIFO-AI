@@ -3062,7 +3062,20 @@ export default function HomeView() {
 
         if (selectedTool === 'image') {
           const imageConfig = JSON.parse(sessionStorage.getItem('imageConfig') || '{}');
-          const imageResponse = await generateToolImage(userQuery, selectedModel, undefined, imageConfig);
+          const imageAttachments = attachments
+            .filter((file) => Boolean(file.base64) && String(file.type || '').toLowerCase().startsWith('image/'))
+            .map((file) => ({
+              type: file.type,
+              data: file.base64 as string,
+              name: file.name,
+            }));
+          const imageResponse = await generateToolImage(
+            userQuery,
+            selectedModel,
+            undefined,
+            imageConfig,
+            imageAttachments
+          );
           const assistantContent = imageResponse.imageUrl
             ? `Generated image${imageResponse.modelUsed ? ` (${imageResponse.modelUsed})` : ''}`
             : `I could not generate an image right now. ${imageResponse.error || 'Please try again.'}`;
