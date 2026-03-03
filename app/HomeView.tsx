@@ -4758,18 +4758,20 @@ Rules:
       {/* Main Content */}
       <main className="flex-1 min-w-0 flex flex-col relative bg-[var(--background)] overflow-x-hidden">
         {/* Header (Mobile) */}
-        <header className="md:hidden p-4 border-b border-[var(--border)] flex justify-between items-center">
-          <span className="font-bold">ChronicleX <span className="brand-ai-glow">AI</span></span>
-          <button
-            type="button"
-            onClick={() => setIsMobileMenuOpen(true)}
-            aria-label="Open menu"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition-colors hover:bg-[var(--surface-strong)]"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
+        <header className="md:hidden fixed top-0 inset-x-0 z-[200] border-b border-[var(--border)] bg-[var(--background)]/95 backdrop-blur pt-[env(safe-area-inset-top)]">
+          <div className="px-4 py-3 flex justify-between items-center">
+            <span className="font-bold">ChronicleX <span className="brand-ai-glow">AI</span></span>
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(true)}
+              aria-label="Open menu"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition-colors hover:bg-[var(--surface-strong)]"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         {isMobileMenuOpen && (
@@ -4922,7 +4924,7 @@ Rules:
         )}
 
         {interactionMode === "read" ? (
-          <div className="flex-1 overflow-y-auto overflow-x-hidden pl-3 pr-3 sm:pl-4 sm:pr-4 md:px-0 scroll-smooth pb-28 md:pb-10" ref={readScrollContainerRef}>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pl-3 pr-3 sm:pl-4 sm:pr-4 md:px-0 scroll-smooth pb-28 md:pb-10 pt-[calc(env(safe-area-inset-top)+4.25rem)] md:pt-0" ref={readScrollContainerRef}>
             <div className="max-w-3xl mx-auto py-8 md:py-10 space-y-6 px-0">
               {messages.length === 0 && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
@@ -5193,7 +5195,7 @@ Rules:
             </div>
           </div>
         ) : (
-          <div className="flex-1 px-4 md:px-0 relative">
+          <div className="flex-1 px-4 md:px-0 relative pt-[calc(env(safe-area-inset-top)+4.25rem)] md:pt-0">
             {/* TTS Provider Toggle - top of listen mode */}
             <div className="absolute top-4 left-0 right-0 flex justify-center z-10">
               <div className="flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] rounded-full px-1 py-1">
@@ -5382,7 +5384,7 @@ Rules:
         )}
 
         {interactionMode === "read" && (
-          <div className={`sticky bottom-0 z-[120] overflow-visible border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-2 md:p-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
+          <div className={`fixed md:sticky bottom-0 left-0 right-0 md:left-auto md:right-auto z-[120] overflow-visible border-t border-[var(--border)] bg-[var(--background)]/90 backdrop-blur p-2 md:p-8 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:pb-8 transition-all ${userMessages.length >= 10 ? 'pb-64 md:pb-44' : ''}`}>
             <div className="max-w-3xl mx-auto w-full">
               <div className="relative md:relative w-full z-[120] bg-[var(--background)] md:p-0 overflow-visible">
                 {/* New Chat Button + SearchBar */}

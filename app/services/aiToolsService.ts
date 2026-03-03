@@ -1514,15 +1514,18 @@ export async function generateDocument(content: string, format: 'pdf' | 'docx' |
         const maxValue = Math.max(...visiblePoints.map((point) => point.value), 1);
         const chartHeight = 156;
         const axisLeft = margin + 24;
-        const axisBottom = y - 28;
         const plotWidth = contentWidth - 36;
         const plotHeight = chartHeight - 42;
         const gap = 8;
         const barWidth = Math.max(14, (plotWidth - gap * (visiblePoints.length + 1)) / visiblePoints.length);
+        const chartTitleGap = 20;
+        const chartBottomPadding = 18;
 
-        ensureVerticalSpace(chartHeight + 52);
+        ensureVerticalSpace(chartHeight + chartTitleGap + chartBottomPadding + 12);
         commands.push(`BT /F2 11 Tf 1 0 0 1 ${margin.toFixed(2)} ${(y - 6).toFixed(2)} Tm (Chart: ${sanitizePdfText(table.columns[numericColIndex] || 'Metric')}) Tj ET`);
-        y -= 20;
+        y -= chartTitleGap;
+
+        const axisBottom = y - 28;
 
         drawLine(axisLeft, axisBottom, axisLeft, axisBottom + plotHeight);
         drawLine(axisLeft, axisBottom, axisLeft + plotWidth, axisBottom);
@@ -1542,7 +1545,7 @@ export async function generateDocument(content: string, format: 'pdf' | 'docx' |
           commands.push(`BT /F1 8 Tf 1 0 0 1 ${(x + 1).toFixed(2)} ${(yBase - 10).toFixed(2)} Tm (${point.label}) Tj ET`);
         });
 
-        y = axisBottom - 18;
+        y = axisBottom - chartBottomPadding;
       };
 
       const drawTable = (table: { columns: string[]; rows: string[][] }) => {

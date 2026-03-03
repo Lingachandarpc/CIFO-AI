@@ -245,7 +245,7 @@ export async function generateNarrativeWithWebSearch(
 ): Promise<{ narration: string; modelUsed: string }> {
       const resolvedModel = (() => {
         const requested = (selectedModel || '').toLowerCase();
-        if (requested === 'gemini-1.5-pro' || requested === 'gemini-pro') return 'gemini-1.5-pro';
+        if (requested === 'gemini-1.5-pro' || requested === 'gemini-pro') return 'gemini-1.5-flash';
         if (requested === 'gemini-1.5-flash' || requested === 'gemini-flash') return 'gemini-1.5-flash';
         return GEMINI_MODEL;
       })();
@@ -446,29 +446,55 @@ ${enableWebSearch && searchContext ? '\nYou have been provided with current web 
     });
 
     const apiUrl = `${GEMINI_API_BASE}/${resolvedModel}:generateContent?key=${apiKey}`;
-    const response = await fetch(apiUrl, {
+    const requestPayload = {
+      contents,
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 4096,
+      },
+    };
+
+    let response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        contents,
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096,
-        },
-      }),
+      body: JSON.stringify(requestPayload),
     });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
-      console.error('Gemini API error:', response.status, errorText);
-      return { 
-        narration: 'Sorry — Gemini AI is unavailable right now.', 
-        modelUsed: 'gemini' 
-      };
+      const modelNotFound = response.status === 404 && /not found|models\//i.test(errorText);
+
+      if (modelNotFound && resolvedModel !== 'gemini-1.5-flash') {
+        const fallbackModel = 'gemini-1.5-flash';
+        const fallbackUrl = `${GEMINI_API_BASE}/${fallbackModel}:generateContent?key=${apiKey}`;
+
+        response = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestPayload),
+        });
+
+        if (!response.ok) {
+          const fallbackError = await response.text().catch(() => 'Unknown error');
+          console.error('Gemini API error:', response.status, fallbackError);
+          return {
+            narration: 'Sorry — Gemini AI is unavailable right now.',
+            modelUsed: fallbackModel,
+          };
+        }
+      } else {
+        console.error('Gemini API error:', response.status, errorText);
+        return {
+          narration: 'Sorry — Gemini AI is unavailable right now.',
+          modelUsed: 'gemini',
+        };
+      }
     }
 
     interface GeminiResponse {

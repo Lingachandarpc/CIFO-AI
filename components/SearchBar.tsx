@@ -348,8 +348,6 @@ export default function SearchBar({
     setIsExpanded(!isExpanded);
   };
 
-  const currentModel = availableModels.find((m) => m.id === selectedModel) || availableModels[0];
-
   const normalizeModelId = (value: string) => {
     const normalized = String(value || '').trim().toLowerCase();
     const aliases: Record<string, string> = {
@@ -373,6 +371,8 @@ export default function SearchBar({
     };
     return aliases[normalized] || normalized;
   };
+
+  const currentModel = availableModels.find((m) => normalizeModelId(m.id) === normalizeModelId(selectedModel)) || availableModels[0];
 
   // Get recommended models based on current mode
   const getModeRecommendedModels = () => {
@@ -466,7 +466,10 @@ export default function SearchBar({
   const shouldShowModelSelector = selectedTool !== 'dashboard';
 
   useEffect(() => {
-    if (!recommendedModels.some((model) => model.id === selectedModel)) {
+    const selectedNormalized = normalizeModelId(selectedModel);
+    const existsInRecommended = recommendedModels.some((model) => normalizeModelId(model.id) === selectedNormalized);
+
+    if (selectedModel !== 'auto' && !existsInRecommended) {
       onModelChange?.('auto');
     }
   }, [recommendedModels, selectedModel, onModelChange]);
@@ -652,6 +655,7 @@ export default function SearchBar({
                     <div className="py-1 max-h-[min(18rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
                       {recommendedModels.map((model) => {
                         const isDisabledModel = normalizedDisabledIds.includes(normalizeModelId(model.id)) && !isAdminEnabledModel(model.id);
+                        const isSelectedModel = normalizeModelId(selectedModel) === normalizeModelId(model.id);
                         return (
                         <button
                           key={model.id}
@@ -663,7 +667,7 @@ export default function SearchBar({
                           }}
                           disabled={isDisabledModel}
                           className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                            selectedModel === model.id
+                            isSelectedModel
                               ? "bg-[var(--foreground)] text-[var(--background)] font-medium"
                               : isDisabledModel
                                 ? "text-[var(--muted)] opacity-50 cursor-not-allowed"
@@ -674,7 +678,7 @@ export default function SearchBar({
                             <span className="truncate">{model.label}</span>
                             <span
                               className={`text-xs whitespace-nowrap flex-shrink-0 ${
-                                selectedModel === model.id ? "opacity-100" : "text-[var(--muted)] opacity-60"
+                                isSelectedModel ? "opacity-100" : "text-[var(--muted)] opacity-60"
                               }`}
                             >
                               {isDisabledModel ? `${model.provider} (Unavailable)` : model.provider}
@@ -682,7 +686,7 @@ export default function SearchBar({
                           </div>
                           {model.description && (
                             <p className={`text-[10px] mt-0.5 leading-tight ${
-                              selectedModel === model.id ? "opacity-70" : "text-[var(--muted)] opacity-50"
+                              isSelectedModel ? "opacity-70" : "text-[var(--muted)] opacity-50"
                             }`}>
                               {model.description}
                             </p>
@@ -763,7 +767,7 @@ export default function SearchBar({
             }}
             disabled={disabled}
             placeholder={placeholder}
-            className={`w-full bg-transparent text-sm text-[var(--foreground)] placeholder-[var(--muted)] resize-none focus:outline-none transition-all ${
+            className={`w-full bg-transparent text-base md:text-sm text-[var(--foreground)] placeholder-[var(--muted)] resize-none focus:outline-none transition-all ${
               isExpanded ? "min-h-96" : "min-h-10 max-h-32"
             }`}
             style={{ height: "auto" }}
