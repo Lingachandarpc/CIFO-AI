@@ -2336,7 +2336,13 @@ export default function HomeView() {
     return (
       normalized === 'sorry — ai is unavailable right now.' ||
       normalized === 'sorry - ai is unavailable right now.' ||
+      normalized.includes('document generation failed: ai content is unavailable right now') ||
+      normalized.includes('document generation failed') ||
+      normalized.includes('please try again in a moment') ||
+      normalized.includes('encountered an error while generating') ||
+      normalized.includes('i could not generate the document right now') ||
       normalized.includes('all ai models failed to generate a response') ||
+      normalized.includes('ai content is unavailable right now') ||
       normalized.includes('api key not configured') ||
       normalized.includes('service is unavailable right now')
     );
@@ -3482,25 +3488,45 @@ ${wantsEditableCanvas
         }
 
         const generatedDocContent = (docNarrative.narration || '').trim();
-        const isNarrativeUnavailable =
-          /\bsorry\b/i.test(generatedDocContent) &&
-          /(unavailable|encountered an error|failed|try again)/i.test(generatedDocContent) &&
-          generatedDocContent.length < 280;
+        const isNarrativeUnavailable = isUnavailableNarrative(generatedDocContent);
 
-        if (!generatedDocContent || isNarrativeUnavailable) {
-          const assistantMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: 'Document generation failed: AI content is unavailable right now. Please try again in a moment.',
-            timestamp: new Date(),
-            animate: interactionModeRef.current === 'read',
-          };
-          setMessages((prev) => [...prev, assistantMsg]);
-          return;
-        }
+        const fallbackDocContent = [
+          `# ${buildDocumentTitle(userQuery)}`,
+          '',
+          '## Executive Summary',
+          `This report is prepared from the request context: ${userQuery.trim() || 'N/A'}.`,
+          '',
+          '## Method/Approach',
+          '- Interpreted the user intent and converted it into a structured report format.',
+          '- Prioritized concise, actionable information relevant to the request.',
+          ...(extractedAttachmentText
+            ? [
+                '',
+                '## Attachment Insights',
+                extractedAttachmentText.trim(),
+              ]
+            : []),
+          '',
+          '## Findings',
+          '- Key points are organized based on the request scope and available context.',
+          '- Recommended outputs should be validated with latest local/source data where needed.',
+          '',
+          '## Recommendations',
+          '- Use this draft as a baseline and refine with any additional location-specific constraints.',
+          '- Request a refreshed run with more context for deeper analysis.',
+          '',
+          '## Conclusion',
+          'The document has been structured for export-ready use and further iteration.',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        const docSourceContent = !generatedDocContent || isNarrativeUnavailable
+          ? fallbackDocContent
+          : generatedDocContent;
 
         const docResult = await generateToolDocument(
-          generatedDocContent,
+          docSourceContent,
           selectedModel,
           attachments,
           {
@@ -3934,6 +3960,44 @@ Ready to assist with dashboard creation.
     return /(insufficient|quota|rate\s*limit|429|billing|api\s*key|unauthorized|forbidden|service unavailable|timeout|timed out|502|503|504|api failure|api error)/i.test(errorText);
   };
 
+  const normalizeModelId = (value: string) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    const aliases: Record<string, string> = {
+      'gemini-1.5-flash': 'gemini-flash',
+      'gemini-2.5-flash': 'gemini-flash',
+      'gemini-flash': 'gemini-flash',
+      'gemini-1.5-pro': 'gemini-pro',
+      'gemini-pro': 'gemini-pro',
+      'gpt-4-turbo': 'gpt-4',
+      'gpt-4': 'gpt-4',
+      'gpt-3.5-turbo': 'gpt-3.5',
+      'gpt-3.5': 'gpt-3.5',
+      'claude-3-sonnet': 'claude-sonnet',
+      'claude-sonnet': 'claude-sonnet',
+      'claude-3-opus': 'claude-opus',
+      'claude-opus': 'claude-opus',
+      'claude-3-haiku': 'claude-haiku',
+      'claude-haiku': 'claude-haiku',
+      'grok-1': 'grok-3',
+      'grok-3': 'grok-3',
+    };
+    return aliases[normalized] || normalized;
+  };
+
+  const isModelAdminEnabledForCurrentTool = useCallback((modelId: string) => {
+    const toolKey = String(selectedTool && selectedTool !== 'text' ? selectedTool : 'text').toLowerCase();
+    const enabledForTool = Array.isArray(enabledModelsByTool?.[toolKey])
+      ? enabledModelsByTool[toolKey]
+      : Array.isArray(enabledModelsByTool?.text)
+        ? enabledModelsByTool.text
+        : [];
+
+    if (!enabledForTool.length) return false;
+
+    const normalizedCandidate = normalizeModelId(modelId);
+    return enabledForTool.some((enabledId) => normalizeModelId(enabledId) === normalizedCandidate);
+  }, [enabledModelsByTool, selectedTool]);
+
   const markModelUnavailable = useCallback((modelId: string, errorText?: string) => {
     if (!modelId || modelId === 'auto') return;
     if (!shouldDisableModelFromError(errorText)) return;
@@ -3941,7 +4005,8 @@ Ready to assist with dashboard creation.
   }, []);
 
   const handleModelChange = (model: string) => {
-    if (disabledModelIds.includes(model)) return;
+    const isDisabled = disabledModelIds.some((id) => normalizeModelId(id) === normalizeModelId(model));
+    if (isDisabled && !isModelAdminEnabledForCurrentTool(model)) return;
     setSelectedModel(model);
     setSettings((prev) => ({
       ...prev,
@@ -3950,11 +4015,12 @@ Ready to assist with dashboard creation.
   };
 
   useEffect(() => {
-    if (selectedModel !== 'auto' && disabledModelIds.includes(selectedModel)) {
+    const isDisabled = disabledModelIds.some((id) => normalizeModelId(id) === normalizeModelId(selectedModel));
+    if (selectedModel !== 'auto' && isDisabled && !isModelAdminEnabledForCurrentTool(selectedModel)) {
       setSelectedModel('auto');
       setSettings((prev) => ({ ...prev, aiModel: AIModel.AUTO }));
     }
-  }, [disabledModelIds, selectedModel]);
+  }, [disabledModelIds, isModelAdminEnabledForCurrentTool, selectedModel]);
 
   const openMediaDialog = (message: ChatMessage) => {
     if (!message.media) return;

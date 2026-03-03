@@ -754,6 +754,7 @@ export async function POST(req: Request) {
 
     const authSession = await getServerSession(authOptions);
     const authEmail = authSession?.user?.email || null;
+    let effectivePolicy: Awaited<ReturnType<typeof enforceUsagePolicy>>['policy'] = null;
 
     if (authEmail) {
       const policyCheck = await enforceUsagePolicy({
@@ -765,7 +766,83 @@ export async function POST(req: Request) {
       if (!policyCheck.allowed) {
         return policyCheck.response;
       }
+      effectivePolicy = policyCheck.policy;
     }
+
+    const normalizeModelForRouting = (modelId: string): string | null => {
+      const normalized = String(modelId || '').trim().toLowerCase();
+      if (!normalized || normalized === 'auto') return null;
+
+      const aliases: Record<string, string> = {
+        'gpt-4': 'gpt-4-turbo',
+        'gpt-4-turbo': 'gpt-4-turbo',
+        'gpt-3.5': 'gpt-3.5-turbo',
+        'gpt-3.5-turbo': 'gpt-3.5-turbo',
+        'claude-sonnet': 'claude-sonnet',
+        'claude-3-sonnet': 'claude-sonnet',
+        'claude-opus': 'claude-opus',
+        'claude-3-opus': 'claude-opus',
+        'claude-haiku': 'claude-haiku',
+        'claude-3-haiku': 'claude-haiku',
+        'gemini': 'gemini-flash',
+        'gemini-flash': 'gemini-flash',
+        'gemini-1.5-flash': 'gemini-flash',
+        'gemini-2.5-flash': 'gemini-flash',
+        'gemini-pro': 'gemini-1.5-pro',
+        'gemini-1.5-pro': 'gemini-1.5-pro',
+        'grok': 'grok-3',
+        'grok-1': 'grok-3',
+        'grok-3': 'grok-3',
+      };
+
+      return aliases[normalized] || normalized;
+    };
+
+    const getEnabledModelsForCurrentTool = (): string[] => {
+      if (!effectivePolicy?.enabledModelsByTool || typeof effectivePolicy.enabledModelsByTool !== 'object') {
+        return [];
+      }
+
+      const tool = interactionMode === 'listen' ? 'listen' : 'read';
+      const aliases = tool === 'listen'
+        ? ['listen', 'text', 'read', 'document']
+        : ['read', 'text', 'document', 'listen'];
+
+      for (const alias of aliases) {
+        const models = effectivePolicy.enabledModelsByTool[alias];
+        if (Array.isArray(models) && models.length > 0) {
+          return models;
+        }
+      }
+
+      return [];
+    };
+
+    const enabledModelsForCurrentTool = getEnabledModelsForCurrentTool();
+    const routedSelectedModel = (() => {
+      const normalizedSelection = normalizeModelForRouting(String(selectedModel || '').trim());
+      if (normalizedSelection) {
+        return normalizedSelection;
+      }
+
+      if (enabledModelsForCurrentTool.length > 0) {
+        const firstAllowed = enabledModelsForCurrentTool
+          .map((modelId) => normalizeModelForRouting(modelId))
+          .find((modelId): modelId is string => Boolean(modelId));
+        if (firstAllowed) {
+          return firstAllowed;
+        }
+      }
+
+      const normalizedAiModel = String(aiModel || '').trim().toLowerCase();
+      if (!normalizedSelection && (!selectedModel || String(selectedModel).trim().toLowerCase() === 'auto')) {
+        if (normalizedAiModel === 'gemini') {
+          return 'gemini-flash';
+        }
+      }
+
+      return selectedModel;
+    })();
 
     // ========================================================================
     // Freemium Token Budget Check
@@ -1038,7 +1115,7 @@ export async function POST(req: Request) {
     // Step 2: Route to optimal model using intelligent scoring
     const routingDecision = routeQuery(queryClassification, {
       aiModel,
-      selectedModel,
+      selectedModel: routedSelectedModel,
     });
 
     // Log the routing decision for debugging

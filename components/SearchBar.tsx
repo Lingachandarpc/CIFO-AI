@@ -350,6 +350,30 @@ export default function SearchBar({
 
   const currentModel = availableModels.find((m) => m.id === selectedModel) || availableModels[0];
 
+  const normalizeModelId = (value: string) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    const aliases: Record<string, string> = {
+      'gemini-1.5-flash': 'gemini-flash',
+      'gemini-2.5-flash': 'gemini-flash',
+      'gemini-flash': 'gemini-flash',
+      'gemini-1.5-pro': 'gemini-pro',
+      'gemini-pro': 'gemini-pro',
+      'gpt-4-turbo': 'gpt-4',
+      'gpt-4': 'gpt-4',
+      'gpt-3.5-turbo': 'gpt-3.5',
+      'gpt-3.5': 'gpt-3.5',
+      'claude-3-sonnet': 'claude-sonnet',
+      'claude-sonnet': 'claude-sonnet',
+      'claude-3-opus': 'claude-opus',
+      'claude-opus': 'claude-opus',
+      'claude-3-haiku': 'claude-haiku',
+      'claude-haiku': 'claude-haiku',
+      'grok-1': 'grok-3',
+      'grok-3': 'grok-3',
+    };
+    return aliases[normalized] || normalized;
+  };
+
   // Get recommended models based on current mode
   const getModeRecommendedModels = () => {
     const activeMode: "text" | AIToolType =
@@ -422,6 +446,22 @@ export default function SearchBar({
   };
 
   const recommendedModels = getModeRecommendedModels();
+  const toolForRestriction = String(
+    currentMode && currentMode !== "text"
+      ? currentMode
+      : "text"
+  ).toLowerCase();
+  const enabledForCurrentTool = Array.isArray(enabledModelsByTool?.[toolForRestriction])
+    ? enabledModelsByTool[toolForRestriction]
+    : Array.isArray(enabledModelsByTool?.text)
+      ? enabledModelsByTool.text
+      : [];
+  const normalizedEnabledForTool = enabledForCurrentTool.map((modelId) => normalizeModelId(modelId));
+  const isAdminEnabledModel = (modelId: string) => {
+    if (!normalizedEnabledForTool.length) return false;
+    return normalizedEnabledForTool.includes(normalizeModelId(modelId));
+  };
+  const normalizedDisabledIds = disabledModelIds.map((modelId) => normalizeModelId(modelId));
   const shouldShowSessionWarning = selectedTool === 'dashboard' || selectedTool === 'document';
   const shouldShowModelSelector = selectedTool !== 'dashboard';
 
@@ -611,7 +651,7 @@ export default function SearchBar({
                     </div>
                     <div className="py-1 max-h-[min(18rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
                       {recommendedModels.map((model) => {
-                        const isDisabledModel = disabledModelIds.includes(model.id);
+                        const isDisabledModel = normalizedDisabledIds.includes(normalizeModelId(model.id)) && !isAdminEnabledModel(model.id);
                         return (
                         <button
                           key={model.id}
