@@ -245,8 +245,8 @@ export async function generateNarrativeWithWebSearch(
 ): Promise<{ narration: string; modelUsed: string }> {
       const resolvedModel = (() => {
         const requested = (selectedModel || '').toLowerCase();
-        if (requested === 'gemini-1.5-pro' || requested === 'gemini-pro') return 'gemini-1.5-flash';
-        if (requested === 'gemini-1.5-flash' || requested === 'gemini-flash') return 'gemini-1.5-flash';
+        if (requested === 'gemini-1.5-pro' || requested === 'gemini-pro') return 'gemini-2.5-flash';
+        if (requested === 'gemini-1.5-flash' || requested === 'gemini-flash' || requested === 'gemini-2.5-flash') return 'gemini-2.5-flash';
         return GEMINI_MODEL;
       })();
 
@@ -468,8 +468,8 @@ ${enableWebSearch && searchContext ? '\nYou have been provided with current web 
       const errorText = await response.text().catch(() => 'Unknown error');
       const modelNotFound = response.status === 404 && /not found|models\//i.test(errorText);
 
-      if (modelNotFound && resolvedModel !== 'gemini-1.5-flash') {
-        const fallbackModel = 'gemini-1.5-flash';
+      if (modelNotFound && resolvedModel !== 'gemini-2.5-flash') {
+        const fallbackModel = 'gemini-2.5-flash';
         const fallbackUrl = `${GEMINI_API_BASE}/${fallbackModel}:generateContent?key=${apiKey}`;
 
         response = await fetch(fallbackUrl, {

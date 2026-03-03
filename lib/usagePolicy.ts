@@ -149,7 +149,7 @@ function getModelAliases(modelId: string): string[] {
 
   const aliases = new Set<string>([normalized]);
   const aliasGroups: string[][] = [
-    ["gemini-flash", "gemini-1.5-flash"],
+    ["gemini-flash", "gemini-1.5-flash", "gemini-2.5-flash"],
     ["gemini-pro", "gemini-1.5-pro"],
     ["gpt-3.5", "gpt-3.5-turbo"],
     ["gpt-4", "gpt-4-turbo"],
